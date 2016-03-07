@@ -42,6 +42,20 @@
 				<!-- set a map of decompressors here if using other than the default -->
 			</bean>
 		</property>
+		<property name="defaultDurableSubscription" value="${xd.messagebus.rabbit.default.durableSubscription}" />
+		<property name="addresses" value="${spring.rabbitmq.addresses:}" />
+		<property name="adminAddresses" value="${spring.rabbitmq.adminAddresses:}" />
+		<property name="nodes" value="${spring.rabbitmq.nodes:}" />
+		<property name="username" value="${spring.rabbitmq.username:}" />
+		<property name="password" value="${spring.rabbitmq.password:}" />
+		<property name="vhost" value="${spring.rabbitmq.virtual_host:}" />
+		<property name="useSSL" value="${spring.rabbitmq.useSSL:false}" />
+		<property name="sslPropertiesLocation" value="${spring.rabbitmq.sslProperties:}" />
+		<property name="keyStore" value="${spring.rabbitmq.ssl.keyStore:}" />
+		<property name="keyStorePassphrase" value="${spring.rabbitmq.ssl.keyStorePassphrase:}" />
+		<property name="trustStore" value="${spring.rabbitmq.ssl.trustStore:}" />
+		<property name="trustStorePassphrase" value="${spring.rabbitmq.ssl.trustStorePassphrase:}" />
+		<property name="longStringLimit" value="${xd.messagebus.rabbit.longStringLimit}" />
 	</bean>
 
 </beans>

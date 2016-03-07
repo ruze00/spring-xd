@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 the original author or authors.
+ * Copyright 2014-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,9 @@ import javax.validation.constraints.AssertTrue;
 import org.hibernate.validator.constraints.NotBlank;
 
 import org.springframework.util.StringUtils;
+import org.springframework.xd.module.options.mixins.MaxMessagesDefaultUnlimitedMixin;
+import org.springframework.xd.module.options.mixins.PeriodicTriggerMixin;
+import org.springframework.xd.module.options.spi.Mixin;
 import org.springframework.xd.module.options.spi.ModuleOption;
 import org.springframework.xd.module.options.spi.ProfileNamesProvider;
 
@@ -29,7 +32,11 @@ import org.springframework.xd.module.options.spi.ProfileNamesProvider;
  * Module options for SFTP source module.
  *
  * @author Ilayaperumal Gopinathan
+ * @author Eric Bottard
+ * @author Gary Russell
  */
+
+@Mixin({ PeriodicTriggerMixin.class, FileAsRefMixin.class, MaxMessagesDefaultUnlimitedMixin.class })
 public class SftpSourceOptionsMetadata implements ProfileNamesProvider {
 
 	private static final String ACCEPT_ALL_FILES = "accept-all-files";
@@ -65,6 +72,10 @@ public class SftpSourceOptionsMetadata implements ProfileNamesProvider {
 	private String pattern = null;
 
 	private String regexPattern = null;
+
+	private boolean allowUnknownKeys = false;
+
+	private String knownHostsExpression = null;
 
 	public String getHost() {
 		return host;
@@ -192,6 +203,25 @@ public class SftpSourceOptionsMetadata implements ProfileNamesProvider {
 	@ModuleOption("simple filename pattern to apply to the filter")
 	public void setPattern(String pattern) {
 		this.pattern = pattern;
+	}
+
+	public boolean isAllowUnknownKeys() {
+		return this.allowUnknownKeys;
+	}
+
+	@ModuleOption("true to allow connecting to a host with an unknown or changed key")
+	public void setAllowUnknownKeys(boolean allowUnknownKeys) {
+		this.allowUnknownKeys = allowUnknownKeys;
+	}
+
+	public String getKnownHostsExpression() {
+		return this.knownHostsExpression;
+	}
+
+	@ModuleOption("a SpEL expresssion location of known hosts file; required if 'allowUnknownKeys' is false; "
+			+ "examples: systemProperties[\"user.home\"]+\"/.ssh/known_hosts\", \"/foo/bar/known_hosts\"")
+	public void setKnownHostsExpression(String knownHostsExpression) {
+		this.knownHostsExpression = knownHostsExpression;
 	}
 
 	@AssertTrue(message = "Use ('privateKey' AND 'passphrase') OR 'password' to specify credentials")

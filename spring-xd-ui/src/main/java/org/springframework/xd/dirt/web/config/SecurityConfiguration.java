@@ -1,15 +1,14 @@
 /*
- * Copyright 2014 the original author or authors.
+ * Copyright 2014-2015 the original author or authors.
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
  *
  * http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software distributed under the License
- * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
- * or implied. See the License for the specific language governing permissions and limitations under
- * the License.
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
  */
 
 package org.springframework.xd.dirt.web.config;
@@ -28,14 +27,22 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 import org.springframework.security.config.annotation.web.configurers.ExpressionUrlAuthorizationConfigurer;
-import org.springframework.security.config.annotation.web.servlet.configuration.EnableWebMvcSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.access.channel.ChannelProcessingFilter;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.web.authentication.logout.HttpStatusReturningLogoutSuccessHandler;
 import org.springframework.security.web.authentication.www.BasicAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.session.ExpiringSession;
+import org.springframework.session.MapSessionRepository;
+import org.springframework.session.SessionRepository;
+import org.springframework.session.web.http.HeaderHttpSessionStrategy;
+import org.springframework.session.web.http.SessionRepositoryFilter;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import org.springframework.web.accept.ContentNegotiationStrategy;
@@ -48,14 +55,21 @@ import org.springframework.web.accept.ContentNegotiationStrategy;
  */
 @Configuration
 @ConditionalOnProperty("security.basic.enabled")
-@EnableWebMvcSecurity
+@EnableWebSecurity
 public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
 
 	public static final Pattern AUTHORIZATION_RULE;
 
 	static {
-		String methodsRegex = StringUtils.arrayToDelimitedString(HttpMethod.values(), "|");
-		AUTHORIZATION_RULE = Pattern.compile("(" + methodsRegex + ")\\s+(.+)\\s+=>\\s+(.+)");
+		String methodsRegex = StringUtils.arrayToDelimitedString(HttpMethod.values(),
+				"|");
+		AUTHORIZATION_RULE = Pattern
+				.compile("(" + methodsRegex + ")\\s+(.+)\\s+=>\\s+(.+)");
+	}
+
+	@Bean
+	public SessionRepository<ExpiringSession> sessionRepository() {
+		return new MapSessionRepository();
 	}
 
 	@Autowired
@@ -72,55 +86,69 @@ public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
 		return new AuthorizationConfig();
 	}
 
-
 	@Override
 	protected void configure(HttpSecurity http) throws Exception {
 
-		final RequestMatcher textHtmlMatcher = new MediaTypeRequestMatcher(contentNegotiationStrategy,
+		final RequestMatcher textHtmlMatcher = new MediaTypeRequestMatcher(
+				contentNegotiationStrategy,
 				MediaType.TEXT_HTML);
 
-		final String loginPage = "/admin-ui/login";
+		final String loginPage = "/admin-ui/#/login";
 
-		BasicAuthenticationEntryPoint basicAuthenticationEntryPoint = new BasicAuthenticationEntryPoint();
+		final BasicAuthenticationEntryPoint basicAuthenticationEntryPoint = new BasicAuthenticationEntryPoint();
 		basicAuthenticationEntryPoint.setRealmName(realm);
 		basicAuthenticationEntryPoint.afterPropertiesSet();
 
-		ExpressionUrlAuthorizationConfigurer<HttpSecurity>.ExpressionInterceptUrlRegistry security =
-				http.csrf().disable()
-						.authorizeRequests()
-						.antMatchers("/admin-ui/styles/**").permitAll()
-						.antMatchers("/admin-ui/images/**").permitAll()
-						.antMatchers("/admin-ui/fonts/**").permitAll()
-						.antMatchers("/assets/**").permitAll();
+		ExpressionUrlAuthorizationConfigurer<HttpSecurity>.ExpressionInterceptUrlRegistry security = http
+				.csrf()
+				.disable()
+				.authorizeRequests()
+				.antMatchers("/")
+				.authenticated()
+				.antMatchers("/admin-ui/**").permitAll()
+				.antMatchers("/authenticate").permitAll()
+				.antMatchers("/security/info").permitAll()
+				.antMatchers("/assets/**").permitAll();
 
 		security = configureSimpleSecurity(security);
 
-		security
-				.anyRequest().authenticated()
-			.and()
-				.formLogin()
-				.loginPage(loginPage)
-				.loginProcessingUrl("/admin-ui/login").defaultSuccessUrl("/admin-ui/")
+		security.and()
+				.formLogin().loginPage(loginPage)
+				.loginProcessingUrl("/admin-ui/login")
+				.defaultSuccessUrl("/admin-ui/").permitAll()
+				.and().logout().logoutUrl("/admin-ui/logout").logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler())
 				.permitAll()
-			.and()
-				.logout().logoutUrl("/admin-ui/logout")
-				.permitAll()
-			.and()
-				.httpBasic()
-			.and()
-				.exceptionHandling()
-				.defaultAuthenticationEntryPointFor(new LoginUrlAuthenticationEntryPoint(loginPage), textHtmlMatcher)
-				.defaultAuthenticationEntryPointFor(basicAuthenticationEntryPoint, AnyRequestMatcher.INSTANCE);
+				.and().httpBasic()
+				.and().exceptionHandling()
+				.defaultAuthenticationEntryPointFor(
+						new LoginUrlAuthenticationEntryPoint(loginPage),
+						textHtmlMatcher)
+				.defaultAuthenticationEntryPointFor(basicAuthenticationEntryPoint,
+						AnyRequestMatcher.INSTANCE);
+
+		security.anyRequest().denyAll();
+
+		final SessionRepositoryFilter<ExpiringSession> sessionRepositoryFilter = new SessionRepositoryFilter<ExpiringSession>(
+				sessionRepository());
+		sessionRepositoryFilter
+				.setHttpSessionStrategy(new HeaderHttpSessionStrategy());
+
+		http.addFilterBefore(sessionRepositoryFilter,
+				ChannelProcessingFilter.class).csrf().disable();
+		http.sessionManagement().sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED);
 	}
 
 	/**
 	 * Read the configuration for "simple" (that is, not ACL based) security and apply it.
 	 */
-	private ExpressionUrlAuthorizationConfigurer<HttpSecurity>.ExpressionInterceptUrlRegistry
-	configureSimpleSecurity(ExpressionUrlAuthorizationConfigurer<HttpSecurity>.ExpressionInterceptUrlRegistry security) {
+	private ExpressionUrlAuthorizationConfigurer<HttpSecurity>.ExpressionInterceptUrlRegistry configureSimpleSecurity(
+			ExpressionUrlAuthorizationConfigurer<HttpSecurity>.ExpressionInterceptUrlRegistry security) {
 		for (String rule : config.getRules()) {
 			Matcher matcher = AUTHORIZATION_RULE.matcher(rule);
-			Assert.isTrue(matcher.matches(), String.format("Unable to parse security rule [%s], expected format is 'HTTP_METHOD ANT_PATTERN => SECURITY_ATTRIBUTE(S)'", rule));
+			Assert.isTrue(matcher.matches(),
+					String.format(
+							"Unable to parse security rule [%s], expected format is 'HTTP_METHOD ANT_PATTERN => SECURITY_ATTRIBUTE(S)'",
+							rule));
 
 			HttpMethod method = HttpMethod.valueOf(matcher.group(1));
 			String urlPattern = matcher.group(2);
@@ -138,6 +166,7 @@ public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
 	 */
 	@ConfigurationProperties(prefix = "xd.security.authorization")
 	public static class AuthorizationConfig {
+
 		private List<String> rules = new ArrayList<String>();
 
 		public List<String> getRules() {

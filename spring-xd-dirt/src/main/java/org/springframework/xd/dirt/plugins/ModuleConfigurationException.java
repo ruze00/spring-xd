@@ -20,17 +20,17 @@ import java.util.List;
 
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
-import org.springframework.xd.dirt.XDRuntimeException;
+import org.springframework.xd.dirt.DirtException;
 import org.springframework.xd.module.ModuleType;
 
 
 /**
  * Thrown when something is wrong with options passed to a module.
- * 
+ *
  * @author David Turanski
  */
 @SuppressWarnings("serial")
-public class ModuleConfigurationException extends XDRuntimeException {
+public class ModuleConfigurationException extends DirtException {
 
 	public ModuleConfigurationException(String message) {
 		super(message);

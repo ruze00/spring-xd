@@ -32,8 +32,8 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
-import org.springframework.xd.dirt.module.ModuleDefinitionService;
 import org.springframework.xd.dirt.module.NoSuchModuleException;
+import org.springframework.xd.dirt.module.support.ModuleDefinitionService;
 import org.springframework.xd.module.ModuleDefinition;
 import org.springframework.xd.module.ModuleType;
 import org.springframework.xd.rest.domain.DetailedModuleDefinitionResource;
@@ -46,6 +46,7 @@ import org.springframework.xd.rest.domain.ModuleDefinitionResource;
  * @author Mark Fisher
  * @author Gunnar Hillert
  * @author Eric Bottard
+ * @author Gary Russell
  */
 @Controller
 @RequestMapping("/modules")
@@ -77,8 +78,10 @@ public class ModulesController {
 			PagedResourcesAssembler<ModuleDefinition> assembler,
 			@RequestParam(value = "type", required = false) ModuleType type,
 			@RequestParam(value = "detailed", defaultValue = "false") boolean detailed) {
-		Page<ModuleDefinition> page = type == null ? moduleDefinitionService.findDefinitions(pageable) : moduleDefinitionService.findDefinitions(pageable, type);
-		return assembler.toResource(page, detailed ? detailedAssembler: simpleAssembler);
+		Page<ModuleDefinition> page = type == null ? this.moduleDefinitionService.findDefinitions(pageable)
+				: moduleDefinitionService.findDefinitions(pageable, type);
+		DetailedModuleDefinitionResourceAssembler ra = this.detailedAssembler;
+		return assembler.toResource(page, detailed ? ra : this.simpleAssembler);
 	}
 
 	/**
@@ -109,7 +112,7 @@ public class ModulesController {
 			@RequestParam("name") String name,
 			@RequestParam("definition") String definition,
 			@RequestParam(value = "force", defaultValue = "false") boolean force
-	) {
+			) {
 		ModuleDefinition moduleDefinition = moduleDefinitionService.compose(name, /*TODO*/null, definition, force);
 		ModuleDefinitionResource resource = simpleAssembler.toResource(moduleDefinition);
 		return resource;

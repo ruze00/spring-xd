@@ -273,11 +273,11 @@ public abstract class AbstractBusPropertiesAccessor implements BusProperties {
 	}
 
 	/**
-	 * The number of partitions for this module.
-	 * @return The count.
+	 * The next module count for non-sink modules
+	 * @return the next module count
 	 */
-	public int getPartitionCount() {
-		return getProperty(PARTITION_COUNT, 1);
+	public int getNextModuleCount() {
+		return getProperty(NEXT_MODULE_COUNT, 1);
 	}
 
 	/**
@@ -342,6 +342,15 @@ public abstract class AbstractBusPropertiesAccessor implements BusProperties {
 	 */
 	public boolean isCompress(boolean defaultValue) {
 		return getProperty(COMPRESS, defaultValue);
+	}
+
+	/**
+	 * If true, subscriptions to taps/topics will be durable.
+	 * @param defaultValue the default value.
+	 * @return the property or default value.
+	 */
+	public boolean isDurable(boolean defaultValue) {
+		return getProperty(DURABLE, defaultValue);
 	}
 
 	// Utility methods

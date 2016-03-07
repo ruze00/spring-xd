@@ -20,8 +20,10 @@ import static org.hamcrest.core.IsEqual.equalTo;
 import static org.hamcrest.core.StringContains.containsString;
 import static org.junit.Assert.assertThat;
 import static org.springframework.xd.shell.command.fixtures.XDMatchers.eventually;
+import static org.springframework.xd.shell.command.fixtures.XDMatchers.exists;
 import static org.springframework.xd.shell.command.fixtures.XDMatchers.fileContent;
 import static org.springframework.xd.shell.command.fixtures.XDMatchers.hasContentsThat;
+import static org.springframework.xd.shell.command.fixtures.XDMatchers.hasValue;
 
 import java.io.File;
 import java.util.Random;
@@ -35,11 +37,13 @@ import org.junit.rules.TestName;
 import org.springframework.shell.Bootstrap;
 import org.springframework.shell.core.JLineShellComponent;
 import org.springframework.xd.dirt.module.ResourceModuleRegistry;
-import org.springframework.xd.dirt.server.SingleNodeApplication;
+import org.springframework.xd.dirt.server.singlenode.SingleNodeApplication;
 import org.springframework.xd.dirt.test.SingleNodeIntegrationTestSupport;
-import org.springframework.xd.shell.command.StreamCommandTemplate;
+import org.springframework.xd.shell.command.MetricsTemplate;
+import org.springframework.xd.shell.command.StreamCommandsTemplate;
 import org.springframework.xd.shell.command.fixtures.HttpSource;
 import org.springframework.xd.test.RandomConfigurationSupport;
+import org.springframework.xd.test.fixtures.CounterSink;
 import org.springframework.xd.test.fixtures.FileSink;
 
 
@@ -60,7 +64,9 @@ public abstract class AbstractSparkStreamingTests {
 
 	private JLineShellComponent shell;
 
-	protected StreamCommandTemplate streamOps;
+	protected StreamCommandsTemplate streamOps;
+
+	private MetricsTemplate metrics;
 
 	private final String transport;
 
@@ -74,7 +80,7 @@ public abstract class AbstractSparkStreamingTests {
 	@Before
 	public void setup() throws Exception {
 		RandomConfigurationSupport randomConfigSupport = new RandomConfigurationSupport();
-		singleNodeApplication = new SingleNodeApplication().run("--transport", this.transport, "--analytics", "redis");
+		singleNodeApplication = new SingleNodeApplication().run("--transport", this.transport);
 		integrationTestSupport = new SingleNodeIntegrationTestSupport(singleNodeApplication);
 		integrationTestSupport.addModuleRegistry(new ResourceModuleRegistry("classpath:/spring-xd/xd/modules"));
 		Bootstrap bootstrap = new Bootstrap(new String[] {"--port", randomConfigSupport.getAdminServerPort()});
@@ -82,13 +88,20 @@ public abstract class AbstractSparkStreamingTests {
 		if (!shell.isRunning()) {
 			shell.start();
 		}
-		streamOps = new StreamCommandTemplate(shell, integrationTestSupport);
+		streamOps = new StreamCommandsTemplate(shell, integrationTestSupport);
+		metrics = new MetricsTemplate(shell);
 	}
 
 	@After
 	public void tearDown() {
-		singleNodeApplication.close();
-		shell.stop();
+		if (singleNodeApplication != null) {
+			singleNodeApplication.close();
+		}
+		singleNodeApplication = null;
+		if (shell != null) {
+			shell.stop();
+		}
+		shell = null;
 	}
 
 	protected void createStream(String streamName, String stream) {
@@ -137,6 +150,28 @@ public abstract class AbstractSparkStreamingTests {
 			streamOps.destroyStream(streamName);
 			streamOps.destroyStream(tapStreamName);
 			sink.cleanup();
+		}
+	}
+
+	@Test
+	public void testTapSparkProcessor() throws Exception {
+		HttpSource source = new HttpSource(shell);
+		String streamName =  testName.getMethodName() + new Random().nextInt();
+		String tapStreamName =  testName.getMethodName() + new Random().nextInt();
+		CounterSink counter = metrics.newCounterSink();
+		try {
+			String stream = String.format("%s | spark-word-count --enableTap=true | null", source);
+			createStream(streamName, stream);
+			String tapStream = String.format("tap:stream:%s.spark-word-count > %s --inputType=text/plain", streamName, counter);
+			createStream(tapStreamName, tapStream);
+			source.ensureReady().postData(TEST_LONG_MESSAGE);
+			assertThat(counter, eventually(50, 100, exists()));
+			assertThat(counter, eventually(hasValue("4")));
+		}
+		finally {
+			streamOps.destroyStream(streamName);
+			streamOps.destroyStream(tapStreamName);
+			counter.cleanup();
 		}
 	}
 

@@ -70,28 +70,28 @@ set CMD_LINE_ARGS=%$
 @rem Setup the command line
 
 @echo off
-set HADOOP_DISTRO=hadoop26
-set found=0
-set NEW_CMD_LINE_ARGS=
-for %%a in (%CMD_LINE_ARGS%) do (
+set APP_HOME_LIB=%APP_HOME%\lib
+@rem If you change the default hadoop distro, make sure to update ContainerOptions.DEFAULT_HADOOP_OPTION
+set HADOOP_DISTRO=hadoop27
+if exist "%APP_HOME_LIB%" (
     setLocal EnableDelayedExpansion
-    if "%%a"=="--hadoopDistro" (
-        set found=1
-    ) else (
-        if !found!==1 (
-            if not "%%a"=="hadoop25" if not "%%a"=="hadoop26" if not "%%a"=="cdh5" if not "%%a"=="hdp22" if not "%%a"=="phd21" (
-                echo ERROR: %%a is not a valid Hadoop distro - valid distros are hadoop25, hadoop26, cdh5, hdp22 and phd21
-                goto fail
-            )
-            set HADOOP_DISTRO=%%a
-            set found=0
+    set found=0
+    for %%a in (%CMD_LINE_ARGS%) do (
+        if !found!==1 set HADOOP_DISTRO=%%a
+        if "%%a"=="--hadoopDistro" (
+            set found=1
         ) else (
-            set NEW_CMD_LINE_ARGS=!NEW_CMD_LINE_ARGS! %%a
+            set found=0
         )
+    )
+    set CLASSPATH=%APP_HOME%\modules\processor\scripts;%APP_HOME%\config
+    set CLASSPATH=!CLASSPATH!;%APP_HOME_LIB%\*
+    set HADOOP_LIB=%APP_HOME%\lib\!HADOOP_DISTRO!
+    if exist "!HADOOP_LIB!" (
+        set CLASSPATH=!CLASSPATH!;!HADOOP_LIB!\*
     )
 )
 set CMD_LINE_ARGS=!NEW_CMD_LINE_ARGS!
-set APP_HOME_LIB=%APP_HOME%\lib
 
 if exist "%APP_HOME_LIB%" (
     setLocal EnableDelayedExpansion
@@ -136,7 +136,7 @@ if not defined XD_MODULE_CONFIG_NAME (
 @rem make sure to append '/' to XD_MODULE_CONFIG_LOCATION until the path issue is resoloved in EnvironmentAwareModuleOptionsMetadataResolver
 set XD_MODULE_CONFIG_LOCATION=%XD_MODULE_CONFIG_LOCATION%/
 
-set SPRING_XD_OPTS=-Dspring.application.name=admin -Dlogging.config=%XD_CONFIG_LOCATION%/xd-admin-logger.properties -Dxd.home=%XD_HOME%
+set SPRING_XD_OPTS=-Dspring.application.name=admin -Dlogging.config=%XD_CONFIG_LOCATION%/xd-admin-logback.groovy -Dxd.home=%XD_HOME%
 set SPRING_XD_OPTS=%SPRING_XD_OPTS% -Dspring.config.location=%XD_CONFIG_LOCATION% -Dxd.config.home=%XD_CONFIG_LOCATION% -Dspring.config.name=%XD_CONFIG_NAME%
 set SPRING_XD_OPTS=%SPRING_XD_OPTS% -Dxd.module.config.location=%XD_MODULE_CONFIG_LOCATION% -Dxd.module.config.name=%XD_MODULE_CONFIG_NAME%
 

@@ -16,18 +16,20 @@
 
 package org.springframework.xd.integration.test;
 
-import static org.junit.Assert.assertEquals;
-
-import java.util.List;
-import java.util.UUID;
-
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-
+import org.springframework.xd.integration.util.XdEnvironment;
 import org.springframework.xd.test.fixtures.FileJdbcJob;
 import org.springframework.xd.test.fixtures.JdbcSink;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Asserts that this job will read the specified file and place the results into the database.
@@ -37,10 +39,14 @@ import org.springframework.xd.test.fixtures.JdbcSink;
 public class FileJdbcTest extends AbstractJobTest {
 
 	private final static String DEFAULT_FILE_NAME = "filejdbctest";
+	private final static String DEFAULT_DIRECTORY = XdEnvironment.RESULT_LOCATION +
+			"/" + FileJdbcJob.DEFAULT_DIRECTORY + "/";
 
 	private JdbcSink jdbcSink;
 
 	private String tableName;
+	
+	private String jobName;
 
 	/**
 	 * Removes the table created from a previous test.
@@ -50,6 +56,7 @@ public class FileJdbcTest extends AbstractJobTest {
 		jdbcSink = sinks.jdbc();
 		tableName = "filejdbctest";
 		jdbcSink.tableName(tableName);
+		jobName = "fjt"+UUID.randomUUID().toString();
 		cleanup();
 	}
 
@@ -61,22 +68,20 @@ public class FileJdbcTest extends AbstractJobTest {
 	public void testPartitionedFileJdbcJob() {
 		String data = UUID.randomUUID().toString();
 		jdbcSink.getJdbcTemplate().getDataSource();
-		FileJdbcJob job = new FileJdbcJob(FileJdbcJob.DEFAULT_DIRECTORY,
+		FileJdbcJob job = new FileJdbcJob(DEFAULT_DIRECTORY,
 				String.format("/%spartition*", DEFAULT_FILE_NAME),
 				FileJdbcJob.DEFAULT_TABLE_NAME,
-				FileJdbcJob.DEFAULT_NAMES);
+				FileJdbcJob.DEFAULT_NAMES,
+				FileJdbcJob.DEFAULT_DELETE_FILES);
+
+		job(jobName, job.toDSL(), true);
 
 		for (int i = 0; i < 5; i++) {
-			// Create a stream that writes to a file. This file will be used by the job.
-			stream("dataSender" + i, sources.http("foobar", 9000 + i) + XD_DELIMITER
-					+ sinks.file(FileJdbcJob.DEFAULT_DIRECTORY, DEFAULT_FILE_NAME + "partition" + i).toDSL());
-			String host = getContainerResolver().getContainerHostForSource("dataSender" + i);
-			sources.http(host, 9000 + i).postData(data);
+			// Setup data files to be used for partition test
+			assertTrue(setupDataFiles(getContainerHostForJob(jobName), DEFAULT_DIRECTORY,
+					DEFAULT_FILE_NAME + "partition" + i + ".out", data));
 		}
-		waitForXD();
-		job(job.toDSL());
-		waitForXD();
-		jobLaunch();
+		jobLaunch(jobName);
 
 		String query = String.format("SELECT data FROM %s", tableName);
 		waitForTablePopulation(query, jdbcSink.getJdbcTemplate(), 5);
@@ -98,16 +103,49 @@ public class FileJdbcTest extends AbstractJobTest {
 	public void testFileJdbcJob() {
 		String data = UUID.randomUUID().toString();
 		jdbcSink.getJdbcTemplate().getDataSource();
-		FileJdbcJob job = new FileJdbcJob(FileJdbcJob.DEFAULT_DIRECTORY, FileJdbcJob.DEFAULT_FILE_NAME,
-				FileJdbcJob.DEFAULT_TABLE_NAME, FileJdbcJob.DEFAULT_NAMES);
+		FileJdbcJob job = new FileJdbcJob(DEFAULT_DIRECTORY, FileJdbcJob.DEFAULT_FILE_NAME,
+				FileJdbcJob.DEFAULT_TABLE_NAME, FileJdbcJob.DEFAULT_NAMES,
+				FileJdbcJob.DEFAULT_DELETE_FILES);
 
-		// Create a stream that writes to a file. This file will be used by the job.
-		stream("dataSender", sources.http() + XD_DELIMITER
-				+ sinks.file(FileJdbcJob.DEFAULT_DIRECTORY, DEFAULT_FILE_NAME).toDSL());
-		sources.httpSource("dataSender").postData(data);
-		job(job.toDSL());
-		waitForXD();
-		jobLaunch();
+		job(jobName, job.toDSL(), true);
+		// Setup data files to be used for test
+		assertTrue(setupDataFiles(getContainerHostForJob(jobName), DEFAULT_DIRECTORY,
+				DEFAULT_FILE_NAME + ".out", data));
+
+		jobLaunch(jobName);
+		String query = String.format("SELECT data FROM %s", tableName);
+
+		waitForTablePopulation(query, jdbcSink.getJdbcTemplate(), 1);
+
+		List<String> results = jdbcSink.getJdbcTemplate().queryForList(query, String.class);
+		assertEquals(1, results.size());
+
+		for (String result : results) {
+			assertEquals(data, result);
+		}
+	}
+
+	/**
+	 * Asserts that fileJdbcJob has written the test data from a file to the table.
+	 *
+	 */
+	@Test
+	public void testFileJdbcJobMultipleInvocations() {
+		List<String> data = new ArrayList<>();
+		String curData = UUID.randomUUID().toString();
+		data.add(curData);
+		final String FILE_NAME = DEFAULT_FILE_NAME+"_MULTIPLE";
+		jdbcSink.getJdbcTemplate().getDataSource();
+		FileJdbcJob job = new FileJdbcJob(DEFAULT_DIRECTORY, FILE_NAME+"*",
+				FileJdbcJob.DEFAULT_TABLE_NAME, FileJdbcJob.DEFAULT_NAMES, true);
+
+		job(jobName, job.toDSL(), true);
+
+		// Setup data files to be used for test
+		assertTrue(setupDataFiles(getContainerHostForJob(jobName), DEFAULT_DIRECTORY,
+				FILE_NAME + "1.out", curData));
+
+		jobLaunch(jobName);
 		String query = String.format("SELECT data FROM %s", tableName);
 
 		waitForTablePopulation(query, jdbcSink.getJdbcTemplate(), 1);
@@ -117,8 +155,30 @@ public class FileJdbcTest extends AbstractJobTest {
 		assertEquals(1, results.size());
 
 		for (String result : results) {
-			assertEquals(data, result);
+			assertTrue(data.contains(result));
 		}
+
+		assertTrue(!fileExistsOnXDInstance(getContainerHostForJob(jobName), DEFAULT_DIRECTORY + File.separator + FILE_NAME + "1.out"));
+
+		curData = UUID.randomUUID().toString();
+		data.add(curData);
+
+		assertTrue(setupDataFiles(getContainerHostForJob(jobName), DEFAULT_DIRECTORY,
+				FILE_NAME + "2.out", curData));
+
+		jobLaunch(jobName);
+
+		waitForTablePopulation(query, jdbcSink.getJdbcTemplate(), 2);
+
+		results = jdbcSink.getJdbcTemplate().queryForList(query, String.class);
+
+		assertEquals(2, results.size());
+
+		for (String result : results) {
+			assertTrue(data.contains(result));
+		}
+
+		assertTrue(!fileExistsOnXDInstance(getContainerHostForJob(jobName), DEFAULT_DIRECTORY + File.separator + FILE_NAME + "2.out"));
 	}
 
 	/**

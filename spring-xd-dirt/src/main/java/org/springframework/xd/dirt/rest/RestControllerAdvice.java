@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2014 the original author or authors.
+ * Copyright 2013-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,15 @@
 
 package org.springframework.xd.dirt.rest;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.hateoas.VndErrors;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.UnsatisfiedServletRequestParameterException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -31,8 +33,8 @@ import org.springframework.xd.dirt.analytics.NoSuchMetricException;
 import org.springframework.xd.dirt.cluster.ContainerShutdownException;
 import org.springframework.xd.dirt.cluster.ModuleMessageRateNotFoundException;
 import org.springframework.xd.dirt.cluster.NoSuchContainerException;
+import org.springframework.xd.dirt.integration.bus.RabbitAdminException;
 import org.springframework.xd.dirt.integration.bus.rabbit.NothingToDeleteException;
-import org.springframework.xd.dirt.integration.bus.rabbit.RabbitAdminException;
 import org.springframework.xd.dirt.job.BatchJobAlreadyExistsException;
 import org.springframework.xd.dirt.job.JobExecutionAlreadyRunningException;
 import org.springframework.xd.dirt.job.JobExecutionNotRunningException;
@@ -63,7 +65,7 @@ import org.springframework.xd.dirt.util.PageNotFoundException;
 @ControllerAdvice
 public class RestControllerAdvice {
 
-	private final Log logger = LogFactory.getLog(this.getClass());
+	private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
 	/*
 	 * Note that any controller-specific exception handler is resolved first. So for example, having a
@@ -320,4 +322,19 @@ public class RestControllerAdvice {
 		return new VndErrors(logref, e.getMessage());
 	}
 
+	@ResponseBody
+	@ExceptionHandler
+	@ResponseStatus(HttpStatus.UNAUTHORIZED)
+	public VndErrors onBadCredentialsException(BadCredentialsException e) {
+		String logref = logDebug(e);
+		return new VndErrors(logref, e.getMessage());
+	}
+
+	@ResponseBody
+	@ExceptionHandler
+	@ResponseStatus(HttpStatus.BAD_REQUEST)
+	public VndErrors onUnsatisfiedServletRequestParameterException(UnsatisfiedServletRequestParameterException e) {
+		String logref = logDebug(e);
+		return new VndErrors(logref, e.getMessage());
+	}
 }

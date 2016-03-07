@@ -17,6 +17,7 @@ buildscript {
 def docsDir = rootProject.file('src/docs/asciidoc') // Will be default with newer asciidoctor plugin
 
 project('documentation-toolchain') {
+	startScripts.enabled = false
 	description = 'Utilities for generating/verifying documentation'
 	dependencies {
 		compile project(':spring-xd-dirt')
@@ -42,8 +43,8 @@ project('documentation-toolchain') {
 				"$docsDir/Sources.asciidoc",
 				"$docsDir/Processors.asciidoc",
 				"$docsDir/Sinks.asciidoc",
-				"$docsDir/Batch-Jobs.asciidoc",
-				"$docsDir/Analytics.asciidoc",
+				"$docsDir/Jobs.asciidoc",
+				"$docsDir/Counters-and-Gauges.asciidoc",
 		]
 	}
 	task checkDocsLinks(type: JavaExec, dependsOn: [compileJava, shellReferenceDoc, moduleOptionsReferenceDoc]) {
@@ -56,11 +57,6 @@ project('documentation-toolchain') {
 
 
 }
-
-
-
-
-
 
 apply plugin: org.asciidoctor.gradle.AsciidoctorPlugin
 

@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.springframework.xd.rxjava;
 
 import java.lang.reflect.Method;
@@ -21,8 +22,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.core.ResolvableType;
@@ -30,7 +31,7 @@ import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
-import org.springframework.integration.expression.IntegrationEvaluationContextAware;
+import org.springframework.integration.context.IntegrationContextUtils;
 import org.springframework.integration.handler.AbstractMessageProducingHandler;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHandlingException;
@@ -66,12 +67,12 @@ import rx.subjects.Subject;
  * All error handling is the responsibility of the processor implementation.
  *
  * @author Mark Pollack
+ * @author Gary Russell
  */
-@SuppressWarnings({"unchecked", "rawtypes"})
-public class MultipleSubjectMessageHandler extends AbstractMessageProducingHandler implements DisposableBean,
-        IntegrationEvaluationContextAware {
+@SuppressWarnings({ "unchecked", "rawtypes" })
+public class MultipleSubjectMessageHandler extends AbstractMessageProducingHandler implements DisposableBean {
 
-    protected final Log logger = LogFactory.getLog(getClass());
+    protected final Logger logger = LoggerFactory.getLogger(getClass());
 
     private final ConcurrentMap<Object, PublishSubject<Object>> subjectMap =
             new ConcurrentHashMap<Object, PublishSubject<Object>>();
@@ -89,7 +90,9 @@ public class MultipleSubjectMessageHandler extends AbstractMessageProducingHandl
 
     private EvaluationContext evaluationContext = new StandardEvaluationContext();
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    private boolean evaluationContextSet;
+
+    @SuppressWarnings({ "rawtypes" })
     public MultipleSubjectMessageHandler(Processor processor, String partitionExpression) {
         Assert.notNull(processor, "processor cannot be null.");
         Assert.notNull(partitionExpression, "Partition expression can not be null");
@@ -99,15 +102,29 @@ public class MultipleSubjectMessageHandler extends AbstractMessageProducingHandl
         this.inputType = ResolvableType.forMethodParameter(method, 0).getNested(2);
     }
 
+    public void setIntegrationEvaluationContext(EvaluationContext evaluationContext) {
+        this.evaluationContext = evaluationContext;
+        this.evaluationContextSet = true;
+    }
+
+    @Override
+    protected void onInit() throws Exception {
+        super.onInit();
+        if (!this.evaluationContextSet) {
+            this.evaluationContext = IntegrationContextUtils.getEvaluationContext(getBeanFactory());
+        }
+    }
 
     @Override
     protected void handleMessageInternal(Message<?> message) throws Exception {
         Subject subjectToUse = getSubject(message);
         if (ClassUtils.isAssignable(inputType.getRawClass(), message.getClass())) {
             subjectToUse.onNext(message);
-        } else if (ClassUtils.isAssignable(inputType.getRawClass(), message.getPayload().getClass())) {
+        }
+        else if (ClassUtils.isAssignable(inputType.getRawClass(), message.getPayload().getClass())) {
             subjectToUse.onNext(message.getPayload());
-        } else {
+        }
+        else {
             throw new MessageHandlingException(message, "Processor signature does not match [" + message.getClass()
                     + "] or [" + message.getPayload().getClass() + "]");
         }
@@ -127,23 +144,27 @@ public class MultipleSubjectMessageHandler extends AbstractMessageProducingHandl
                 Observable<?> outputStream = processor.process(subject);
 
                 final Subscription subscription = outputStream.subscribe(new Action1<Object>() {
+
                     @Override
                     public void call(Object outputObject) {
                         if (ClassUtils.isAssignable(Message.class, outputObject.getClass())) {
                             getOutputChannel().send((Message) outputObject);
-                        } else {
+                        }
+                        else {
                             getOutputChannel().send(MessageBuilder.withPayload(outputObject).build());
                         }
                     }
                 }, new Action1<Throwable>() {
+
                     @Override
                     public void call(Throwable throwable) {
-                        logger.error(throwable);
+                        logger.error(throwable.getMessage(), throwable);
                         subjectMap.remove(idToUse);
                     }
                 });
 
                 outputStream.doOnCompleted(new Action0() {
+
                     @Override
                     public void call() {
                         logger.error("Subscription close for [" + subscription + "]");
@@ -152,7 +173,8 @@ public class MultipleSubjectMessageHandler extends AbstractMessageProducingHandl
                 });
 
                 subscriptionMap.put(idToUse, subscription);
-            } else {
+            }
+            else {
                 subject = existingSubject;
             }
         }
@@ -167,8 +189,4 @@ public class MultipleSubjectMessageHandler extends AbstractMessageProducingHandl
         }
     }
 
-    @Override
-    public void setIntegrationEvaluationContext(EvaluationContext evaluationContext) {
-        this.evaluationContext = evaluationContext;
-    }
 }

@@ -244,10 +244,12 @@ public class SparkTasklet implements Tasklet, EnvironmentAware, StepExecutionLis
 		StringBuilder classPathBuilder = new StringBuilder();
 		String separator = System.getProperty("path.separator");
 		for (String url : classPath) {
-			if (classPathBuilder.length() > 0) {
-				classPathBuilder.append(separator);
+			if (!url.contains("logback")) {
+				if (classPathBuilder.length() > 0) {
+					classPathBuilder.append(separator);
+				}
+				classPathBuilder.append(url);
 			}
-			classPathBuilder.append(url);
 		}
 
 		ProcessBuilder pb = new ProcessBuilder(sparkCommand).redirectErrorStream(true);
@@ -358,13 +360,13 @@ public class SparkTasklet implements Tasklet, EnvironmentAware, StepExecutionLis
 	private void printLog(List<String> lines, int exitCode) {
 		if (exitCode != 0) {
 			for (String line : lines) {
-				logger.error("Spark Log: " + line);
+				logger.error("Spark Logger: " + line);
 			}
 		}
 		else {
 			if (logger.isDebugEnabled()) {
 				for (String line : lines) {
-					logger.debug("Spark Log: " + line);
+					logger.debug("Spark Logger: " + line);
 				}
 			}
 		}

@@ -72,7 +72,7 @@ set CMD_LINE_ARGS=%$
 @echo off
 set APP_HOME_LIB=%APP_HOME%\lib
 @rem If you change the default hadoop distro, make sure to update ContainerOptions.DEFAULT_HADOOP_OPTION
-set HADOOP_DISTRO=hadoop26
+set HADOOP_DISTRO=hadoop27
 if exist "%APP_HOME_LIB%" (
     setLocal EnableDelayedExpansion
     set found=0
@@ -116,7 +116,7 @@ if not defined XD_MODULE_CONFIG_NAME (
 @rem make sure to append '/' to XD_MODULE_CONFIG_LOCATION until the path issue is resoloved in EnvironmentAwareModuleOptionsMetadataResolver
 set XD_MODULE_CONFIG_LOCATION=%XD_MODULE_CONFIG_LOCATION%/
 
-set SPRING_XD_OPTS=-Dspring.application.name=container -Dlogging.config=%XD_CONFIG_LOCATION%/xd-container-logger.properties -Dxd.home=%XD_HOME%
+set SPRING_XD_OPTS=-Dspring.application.name=container -Dlogging.config=%XD_CONFIG_LOCATION%/xd-container-logback.groovy -Dxd.home=%XD_HOME%
 set SPRING_XD_OPTS=%SPRING_XD_OPTS% -Dspring.config.location=%XD_CONFIG_LOCATION% -Dxd.config.home=%XD_CONFIG_LOCATION% -Dspring.config.name=%XD_CONFIG_NAME%
 set SPRING_XD_OPTS=%SPRING_XD_OPTS% -Dxd.module.config.location=%XD_MODULE_CONFIG_LOCATION% -Dxd.module.config.name=%XD_MODULE_CONFIG_NAME%
 

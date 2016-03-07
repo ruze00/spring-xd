@@ -1,14 +1,14 @@
 [[adminui]]
-ifndef::env-github[]
-== Admin UI 
-endif::[]
+== Admin UI
 
 === Introduction
 
-Spring XD provides a browser-based GUI which currently has 2 sections allowing you to
+Spring XD provides a browser-based GUI which currently has 4 sections:
 
-* perform Batch Job related tasks
-* deploy/undeploy Stream Definitions
+* **Containers** Provides the XD cluster view with the list of all running containers
+* **Streams** Deploy/undeploy Stream Definitions
+* **Jobs** Perform Batch Job related tasks
+* **Analytics** Create data visualizations for the various analytics modules
 
 Upon starting Spring XD, the Admin UI is available at:
 
@@ -18,9 +18,9 @@ For example: http://localhost:9393/admin-ui
 
 If you have enabled https, then it will be located at https://localhost:9393/admin-ui
 
-If you have enabled security, a login form is available at http://localhost:9393/admin-ui/login
+If you have enabled security, a login form is available at http://localhost:9393/admin-ui/#/login
 
-**Note**: Default admin server port is 9393
+**Note**: Default admin server port is `9393`
 
 .The Spring XD Admin UI
 image::images/spring-xd-admin-ui-about.png[The Spring XD Admin UI, width=500]
@@ -136,24 +136,59 @@ image::images/spring-xd-admin-ui-jobs-deployment-details.png[Job Deployment Deta
 
 ==== List job executions
 
-This page lists the batch job executions and provides option to *restart* specific job executions, provided the batch job is restartable and stopped/failed.
+This page lists the Batch Job Executions and provides the option to *restart* or *stop* a specific job execution, provided the operation is available.
+Furthermore, you have the option to view the Job execution details.
 
 .List Job Executions
 image::images/spring-xd-admin-ui-executions.png[List Job Executions, width=500]
 
-Furthermore, you have the option to view the Job execution details.
+The list of Job Executions also shows the state of the underlying Job Definition. The following states can be shown.
+
+[cols=".^1,.^4"]
+|===
+
+|image:images/spring-xd-admin-ui-jobs-job-execution-status-undeployed.png[Create Definition, 133, 36, title="Undeployed Job Definition"]
+|The underlying Job Definition was undeployed.
+
+|image:images/spring-xd-admin-ui-jobs-job-execution-status-deleted.png[Create Definition, 133, 36, title="Deleted Job Definition"]
+|The underlying Job Definition was deleted.
+
+|image:images/spring-xd-admin-ui-jobs-job-execution-status-composed.png[View Details, 133, 36, title="Composed Job Definition"]
+|This is a composed Job Definition.
+
+|===
+
+As an example, we have created the following composed job using the Spring XD shell:
+
+[source,bash]
+----
+spring> job create composed1 --definition "myjob" --deploy
+spring> job create composed2 --definition "myjob" --deploy
+spring> job create composedDemoJob --definition "composed1 || composed2" --deploy
+spring> job launch composedDemoJob
+----
+
+Once executed, you should see the _composedDemoJob_ on the Job Execution page:
+
+.Job Executions with Composed Job Execution
+image::images/spring-xd-admin-ui-jobs-job-executions-composed.png[Composed Job Execution, width=500]
+
+By clicking on the magnifying glass you will be able to see the composed job's details,
+including the associated child Job Executions for the jobs _composed1_ and _composed2_.
 
 ===== Job execution details
 
-.Job Execution Details
-image::images/spring-xd-admin-ui-jobs-job-execution-details.png[Job Execution Details, width=500]
+.Job Execution Details of Composed Job
+image::images/spring-xd-admin-ui-jobs-job-execution-details-composed.png[Composed Job Execution Details, width=500]
 
-The same screen also contains a list of the executed steps:
+The list of Job Executions on the Job execution details page will only be visible for
+composed jobs. In the case of a non-composed Job, you would see the following:
 
 .Job Execution Details - Steps
 image::images/spring-xd-admin-ui-jobs-job-execution-details-steps.png[Job Execution Details - Steps, width=500]
 
-From there you can drill deeper into the _Step Execution Details_.
+The Job Execution Details screen also contains a list of the executed steps. You can
+further drill into the _Step Execution Details_ by clicking onto the magnifying glass.
 
 ===== Step execution details
 
@@ -181,3 +216,38 @@ image::images/spring-xd-admin-ui-jobs-step-execution-history.png[Step Execution 
 
 On this screen, you can view various metrics associated with the selected step such as *duration*, *read counts*, *write counts* etc.
 
+[[adminui-analytics]]
+=== Analytics
+
+The _Analytics_ section of the admin UI provides dashboarding and data visualization capabilities for the various analytics modules available in _Spring XD_:
+
+* Counters
+* Aggregate Counters
+* Field-Value Counters
+* Gauges
+* Rich Gauges
+
+For example, if you have created the `springtweets` stream and the corresponding counter in the <<counter, Counter chapter>>, you can now easily create the corresponding graph from within the **Dashboard** tab:
+
+1. Under `Metric Type`, select `Counters` from the select box
+2. Under `Stream`, select `tweetcount`
+3. Under `Visualization`, select the desired chart option, `Bar Chart`
+
+You will see a visualization similar to the following:
+
+.Counter Bar Chart
+image::images/spring-xd-admin-ui-analytics-counter-barchart.png[Analytics Bar Chart, width=500]
+
+Under `Visualization`, select the desired chart option, `Graph Chart`
+
+You will see a visualization similar to the following:
+
+.Counter Graph
+image::images/spring-xd-admin-ui-analytics-counter.png[Analytics Counter Graph, width=500]
+
+Using the icons to the right, you can add additional charts to the dashboard, re-arange the order of created dashboards or remove data visualizations.
+
+The remaining 3 tabs **Counters**, **Gauges** and **Rich-Gauges**, provide default visualizations for all _Spring XD_ counters within the system. For example, if you have created the <<simple-tap-example, Simple Tap Example>> (Rich Gauge) in the <<counter, Counter Chapter>>, you will see a visualization similar to the following under the _Rich-Gauges_ tab:
+
+.Rich Gauge
+image::images/spring-xd-admin-ui-analytics-richgauge.png[Analytics Rich Gauge, width=500]

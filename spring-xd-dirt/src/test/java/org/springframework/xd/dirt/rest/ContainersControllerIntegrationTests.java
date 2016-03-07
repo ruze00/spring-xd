@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2014 the original author or authors.
+ * Copyright 2013-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 import org.springframework.test.context.web.WebAppConfiguration;
 import org.springframework.xd.dirt.cluster.Container;
 import org.springframework.xd.dirt.cluster.ContainerAttributes;
-import org.springframework.xd.dirt.cluster.DetailedContainer;
+import org.springframework.xd.dirt.container.store.DetailedContainer;
 
 /**
  * Tests REST compliance of containers endpoint.
@@ -48,6 +48,7 @@ import org.springframework.xd.dirt.cluster.DetailedContainer;
  * @author Ilayaperumal Gopinathan
  * @author Mark Fisher
  * @author David Turanski
+ * @author Gunnar Hillert
  */
 @RunWith(SpringJUnit4ClassRunner.class)
 @WebAppConfiguration
@@ -66,7 +67,7 @@ public class ContainersControllerIntegrationTests extends AbstractControllerInte
 		containers.add(new DetailedContainer(container1));
 		containers.add(new DetailedContainer(container2));
 		Page<DetailedContainer> pagedEntity = new PageImpl<DetailedContainer>(containers);
-		when(containerRepository.findAllRuntimeContainers(pageable)).thenReturn(pagedEntity);
+		when(containerRepository.findAllRuntimeContainers(pageable, true)).thenReturn(pagedEntity);
 		when(containerRepository.findOne("1")).thenReturn(container1);
 	}
 

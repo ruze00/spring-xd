@@ -9,13 +9,12 @@ buildscript {
 		jcenter()
 	}
 	dependencies {
-		classpath("org.springframework.boot:spring-boot-gradle-plugin:1.2.1.RELEASE")
+		classpath("org.springframework.boot:spring-boot-gradle-plugin:1.2.3.RELEASE")
 		classpath("org.springframework.build.gradle:propdeps-plugin:0.0.7")
-		classpath 'com.moowork.gradle:gradle-grunt-plugin:0.6'
-		classpath 'com.moowork.gradle:gradle-node-plugin:0.7'
 		classpath 'me.champeau.gradle:gradle-javadoc-hotfix-plugin:0.1'
 		classpath 'nl.javadude.gradle.plugins:license-gradle-plugin:0.10.0'
 		classpath 'org.codehaus.groovy:groovy-backports-compat23:2.3.5'
+		classpath 'org.jfrog.buildinfo:build-info-extractor-gradle:3.1.1'
 	}
 }
 
@@ -50,6 +49,26 @@ ext {
 	linkScmUrl = 'https://github.com/spring-projects/spring-xd'
 	linkScmConnection = 'https://github.com/spring-projects/spring-xd.git'
 	linkScmDevConnection = 'git@github.com:spring-projects/spring-xd.git'
+	xdDevelopers = [
+		[ name:'Mark Fisher', id:'markfisher', email: 'mfisher@pivotal.io'],
+		[ name:'Mark Pollack', id:'markpollack', email: 'mpollack@pivotal.io'],
+		[ name:'Gary Russell', id:'garyrussell', email: 'grussell@pivotal.io'],
+		[ name:'Gunnar Hillert', id:'ghillert', email: 'ghillert@pivotal.io'],
+		[ name:'Patrick Peralta', id:'pperalta', email: 'pperalta@pivotal.io'],
+		[ name:'David Turanski', id:'dturanski', email: 'dturanski@pivotal.io'],
+		[ name:'Eric Bottard', id:'ebottard', 	email: 'ebottard@pivotal.io'],
+		[ name:'Glenn Renfro', id:'grenfro', email: 'grenfro@pivotal.io'],
+		[ name:'Ilayaperumal Gopinathan', id:'igopinathan', email: 'igopinathan@pivotal.io'],
+		[ name:'Thomas Risberg', id:'trisberg', email: 'trisberg@pivotal.io'],
+		[ name:'Marius Bogoevici', id:'mbogoevici', email: 'mbogoevici@pivotal.io'],
+		[ name:'Jennifer Hickey', id:'jhickey', email: ''],
+		[ name:'Michael Minella', id:'mminella', email: 'mminella@pivotal.io'],
+		[ name:'Andy Clement', id:'aclement', email: 'aclement@pivotal.io'],
+		[ name:'Luke Taylor', id:'ltaylor', email: ''],
+		[ name:'Dave Syer', id:'dsyer', email: 'dsyer@pivotal.io'],
+		[ name:'Janne Valkealahti', id:'jvalkealahti', email: 'jvalkealahti@pivotal.io'],
+		[ name: 'Thomas Darimont', id:'tdarimont', email: 'tdarimont@pivotal.io']
+	]
 
 	javadocLinks = [
 			"http://docs.spring.io/spring-xd/docs/1.0.x/api/"
@@ -67,6 +86,7 @@ ext {
 			'spring-xd-analytics',
 			'spring-xd-analytics-ml',
 			'spring-xd-rxjava',
+			'spring-xd-reactor',
 			'spring-xd-tuple',
 			'spring-xd-module',
 			'spring-xd-rest-client',
@@ -75,11 +95,12 @@ ext {
 			'spring-xd-hadoop',
 			'spring-xd-extension-http',
 			'spring-xd-extension-jdbc',
+			'spring-xd-extension-gpfdist',
 			'spring-xd-extension-reactor',
 			'spring-xd-extension-gemfire',
 			'spring-xd-extension-kafka',
+			'spring-xd-extension-cassandra',
 			'spring-xd-messagebus-spi',
-			'spring-xd-spi-common'
 	].collect { p -> project(p) } + messagebusProjects
 }
 
@@ -93,17 +114,15 @@ allprojects {
 
 	repositories {
 		mavenCentral()
-		mavenLocal()
 		maven { url 'http://repo.spring.io/milestone' }
 		maven { url 'http://repo.spring.io/libs-milestone' }
-		maven { url 'http://repo.spring.io/libs-snapshot' }
 		maven { url 'http://repo.spring.io/plugins-release' }
 		maven { url 'https://repo.eclipse.org/content/repositories/paho-releases' }
 	}
 }
 
 ext {
-	xdAdminUIVersion = '1.2.0.BUILD-SNAPSHOT'
+	xdAdminUIVersion = '1.3.1.RELEASE'
 	// Not in IO
 	activemqVersion = '5.6.0'
 	apacheFtpServerVersion = '1.0.6'
@@ -121,13 +140,16 @@ ext {
 	splunkVersion = '1.3.0'
 	springBatchAdminMgrVersion = '1.3.0.RELEASE'
 	springIntegrationSplunkVersion = '1.1.0.RELEASE'
-	springIntegrationKafkaVersion = '1.1.1.RELEASE'
-	kafkaVersion = '0.8.1.1'
+	springIntegrationKafkaVersion = '1.3.0.RELEASE'
+	kafkaVersion = '0.8.2.2'
 	springShellVersion = '1.1.0.RELEASE'
 	zookeeperVersion = '3.4.6'
-	sparkVersion = '1.2.1'
+	sparkVersion = '1.3.1'
 	sparkScalaVersion = '2.10'
 	sqoopVersion = '1.4.5'
+	springIntegrationCassandraVersion = '0.5.0.RELEASE'
+	cassandraVersion = '2.1.5'
+	cassandraUnitVersion = '2.0.2.2'
 
 	// Also in IO
 	nettyVersion = '3.7.0.Final' // N.B. Reactor depends on Netty 4
@@ -136,7 +158,7 @@ ext {
 	oldGuavaVersion = '15.0'  // This is only used by spring-xd-integration-test, IO uses version 17.0
 	guavaVersion = '16.0.1'
 
-	springDataHadoopBase = '2.1.1.RELEASE'
+	springDataHadoopBase = '2.2.1.RELEASE'
 
 //	//Reactor 1.1 is used in spring-xd-extension-batch transitively though spring integration
 //	reactor11xVersion = '1.1.5.RELEASE'
@@ -155,20 +177,47 @@ configure(javaProjects) { subproject ->
 	apply plugin: 'eclipse'
 	apply plugin: 'idea'
 	apply plugin: 'propdeps'
-	apply plugin: 'propdeps-maven'
 	apply plugin: 'propdeps-idea'
 	apply plugin: 'propdeps-eclipse'
+	apply plugin: 'com.jfrog.artifactory'
 
 	dependencies {
 		versionManagement files(rootProject.file('dependencies.properties'))
 	}
+	startScripts.enabled = false
+	distZip.enabled = false
 
 	bootRepackage {
 		enabled = false
 	}
 
-	if (!subproject.projectDir.absolutePath.contains('spring-xd-starters')
-			&& !subproject.projectDir.absolutePath.contains('spring-xd-gradle-plugins')) {
+	compileJava {
+		sourceCompatibility = 1.7
+		targetCompatibility = 1.7
+		options.fork = true
+		options.forkOptions.with {
+			memoryMaximumSize = "512m"
+		}
+	}
+
+	compileTestJava {
+		sourceCompatibility = 1.7
+		targetCompatibility = 1.7
+		options.fork = true
+		options.forkOptions.with {
+			memoryMaximumSize = "512m"
+		}
+	}
+
+	eclipse {
+		jdt {
+			sourceCompatibility=1.7
+			targetCompatibility=1.7
+		}
+		project { natures += 'org.springframework.ide.eclipse.core.springnature' }
+	}
+
+	if (!subproject.projectDir.absolutePath.contains('spring-xd-starters')) {
 		apply from: "${rootProject.projectDir}/publish-maven.gradle"
 		apply plugin: 'javadocHotfix'
 		apply plugin: 'license'
@@ -184,27 +233,6 @@ configure(javaProjects) { subproject ->
 			excludes(['**/package-info.java'])
 		}
 
-		compileJava {
-			sourceCompatibility = 1.7
-			targetCompatibility = 1.7
-			options.fork = true
-			options.forkOptions.with {
-				memoryMaximumSize = "512m"
-			}
-		}
-
-		compileTestJava {
-			sourceCompatibility = 1.7
-			targetCompatibility = 1.7
-			options.fork = true
-			options.forkOptions.with {
-				memoryMaximumSize = "512m"
-			}
-		}
-
-		eclipse {
-			project { natures += 'org.springframework.ide.eclipse.core.springnature' }
-		}
 
 		// Include project specific settings
 		task eclipseSettings(type: Copy) {
@@ -250,7 +278,12 @@ configure(javaProjects) { subproject ->
 
 		configurations.all {
 			resolutionStrategy.cacheChangingModulesFor 60, 'minutes'
-			exclude group: 'ch.qos.logback', module: 'logback-classic'
+		}
+		if (!subproject.projectDir.absolutePath.contains('spring-xd-yarn-client') &&
+			!subproject.projectDir.absolutePath.contains('spring-xd-yarn-appmaster')) {
+			configurations.all {
+				exclude group: 'org.slf4j', module: 'slf4j-log4j12'
+			}
 		}
 		// dependencies that are common across all java projects
 		dependencies {
@@ -358,9 +391,9 @@ project('spring-xd-analytics') {
 		testCompile project(":spring-xd-test")
 		testCompile "nl.jqno.equalsverifier:equalsverifier:$equalsverifierVersion"
 		testCompile "com.fasterxml.jackson.core:jackson-databind"
-		runtime "log4j:log4j",
+		runtime (
 				"org.slf4j:jcl-over-slf4j",
-				"org.slf4j:slf4j-log4j12", "org.apache.commons:commons-pool2"
+				"org.apache.commons:commons-pool2")
 	}
 }
 
@@ -376,6 +409,16 @@ project('spring-xd-rxjava') {
 	description = 'Spring XD RxJava'
 	dependencies {
 		compile "io.reactivex:rxjava"
+		compile "org.springframework.integration:spring-integration-core"
+		compile "org.springframework:spring-expression"
+		compile "org.slf4j:slf4j-api"
+	}
+}
+
+project('spring-xd-reactor') {
+	description = 'Spring XD Reactor'
+	dependencies {
+		compile "io.projectreactor:reactor-stream"
 		compile "org.springframework.integration:spring-integration-core"
 		compile "org.springframework:spring-expression"
 	}
@@ -427,7 +470,6 @@ project('spring-xd-dirt') {
 		compile "org.jolokia:jolokia-core"
 		compile "com.fasterxml.jackson.core:jackson-databind"
 		compile "log4j:log4j"
-		compile "com.esotericsoftware:kryo-shaded"
 		compile "redis.clients:jedis"
 		compile("org.apache.zookeeper:zookeeper:$zookeeperVersion") {
 			exclude group: 'jline', module: 'jline'
@@ -440,6 +482,7 @@ project('spring-xd-dirt') {
 		}
 		compile "commons-lang:commons-lang:2.4"
 		compile "args4j:args4j:$args4jVersion"
+		compile "com.esotericsoftware:kryo-shaded"
 
 		compile "org.springframework.batch:spring-batch-core"
 		//Required for a classloading issue. See https://github.com/spring-projects/spring-xd/pull/1116
@@ -471,9 +514,7 @@ project('spring-xd-dirt') {
 		compile "org.hibernate:hibernate-validator"
 		compile "com.google.code.findbugs:jsr305"
 
-		runtime "org.slf4j:jul-to-slf4j"
 		runtime "org.slf4j:jcl-over-slf4j"
-		runtime "org.slf4j:slf4j-log4j12"
 		runtime "org.yaml:snakeyaml"
 		runtime "org.postgresql:postgresql:$postgresqlVersion"
 		runtime "mysql:mysql-connector-java"
@@ -494,6 +535,8 @@ project('spring-xd-dirt') {
 		// ************* Dirt-Container only (per se)
 		compile project(":spring-xd-module")
 		compile "com.jayway.jsonpath:json-path"
+		// TODO: move as a plugin-only requirement
+		compile project(':spring-xd-spark-streaming')
 
 		// ************* Container: Modules (should move on their own: XD-915)
 		compile project(":spring-xd-hadoop")
@@ -510,6 +553,16 @@ project('spring-xd-dirt') {
 		runtime("org.springframework:spring-oxm") {
 			exclude group: "commons-lang", module: "commons-lang"
 		}
+
+		// The following is needed by cassandra module
+		runtime("org.springframework.integration:spring-integration-cassandra:$springIntegrationCassandraVersion") {
+			exclude group: "com.google.guava", module: "guava"
+		}
+
+		// Use Jetty (works better on YARN)
+		runtime 'org.eclipse.jetty:jetty-server:8.1.14.v20131031'
+		runtime 'org.eclipse.jetty:jetty-webapp:8.1.14.v20131031'
+		runtime 'org.eclipse.jetty:jetty-plus:8.1.14.v20131031'
 
 		// ************* Test
 		testCompile project(":spring-xd-test")
@@ -528,8 +581,8 @@ project('spring-xd-dirt') {
 	}
 
 	// skip the startScripts task to avoid default start script generation
-	startScripts.setEnabled(false)
-	mainClassName = "org.springframework.xd.dirt.server.SingleNodeApplication"
+	startScripts.enabled = false
+	mainClassName = "org.springframework.xd.dirt.server.singlenode.SingleNodeApplication"
 
 	test {
 		systemProperties["xd.home"] = "${rootProject.projectDir}"
@@ -550,12 +603,17 @@ project('spring-xd-dirt') {
 
 	applicationDistribution.from(scriptFiles) { into "bin" }
 
-	applicationDistribution.from(moduleFiles) { into "modules" }
+	applicationDistribution.from(moduleFiles) {
+		into "modules"
+		include "*/*/lib/*"
+		include "*/*/config/*"
+		include "common/*"
+	}
 
 	// Following execution is used by jsTests task to start SingleNodeApplication as background process
 	task backgroundAdminServer << { task ->
 		println "Starting SingleNode server as a background process"
-		ProcessBuilder processBuilder = new ProcessBuilder("java", "-cp", sourceSets.main.runtimeClasspath.getAsPath(), "org.springframework.xd.dirt.server.SingleNodeApplication");
+		ProcessBuilder processBuilder = new ProcessBuilder("java", "-cp", sourceSets.main.runtimeClasspath.getAsPath(), "org.springframework.xd.dirt.server.singlenode.SingleNodeApplication");
 		processBuilder.directory(file("$rootDir/spring-xd-dirt"))
 		def Process proc = processBuilder.start()
 		proc.consumeProcessOutputStream(System.out)
@@ -635,9 +693,15 @@ project('spring-xd-hadoop') {
 		configurations.compile.exclude(group: 'org.apache.httpcomponents', module: 'httpcore')
 		configurations.compile.exclude(group: 'com.sun.jersey', module: 'jersey-client')
 		configurations.compile.exclude(group: 'org.fusesource.leveldbjni', module: 'leveldbjni-all')
+		configurations.compile.exclude(group: 'org.apache.curator', module: 'curator-framework')
+		configurations.compile.exclude(group: 'org.apache.curator', module: 'curator-recipes')
+		configurations.compile.exclude(group: 'org.apache.curator', module: 'curator-client')
+		configurations.compile.exclude(group: 'org.apache.htrace', module: 'htrace-core')
 
 		compile("org.springframework.data:spring-data-hadoop-store") { exclude group: 'org.apache.hadoop' }
 		testRuntime "org.xerial.snappy:snappy-java"
+		testRuntime "log4j:log4j"
+		testRuntime "org.slf4j:slf4j-log4j12"
 	}
 }
 
@@ -658,7 +722,6 @@ project('spring-xd-yarn:spring-xd-yarn-client') {
 		compile "org.springframework:spring-tx"
 		compile "org.springframework.batch:spring-batch-core"
 		compile("org.springframework.data:spring-yarn-boot-cli") {
-			exclude group: 'javax.servlet', module: 'servlet-api'
 			exclude group: 'javax.servlet.jsp', module: 'jsp-api'
 			exclude group: 'tomcat', module: 'jasper-runtime'
 			exclude group: 'tomcat', module: 'jasper-compiler'
@@ -755,16 +818,15 @@ project('spring-xd-gemfire-server') {
 		compile "commons-beanutils:commons-beanutils"
 		compile "org.springframework.data:spring-data-gemfire"
 		compile project(':spring-xd-tuple')
-		runtime "log4j:log4j",
-				"org.slf4j:jcl-over-slf4j",
-				"org.slf4j:slf4j-log4j12"
+		runtime 'ch.qos.logback:logback-classic'
+		runtime "org.codehaus.groovy:groovy-all"
 	}
 	apply plugin: 'application'
 	// skip the startScripts task to avoid default start script generation
-	startScripts.setEnabled(false)
+	startScripts.enabled = false
 
 	task(launch, dependsOn: 'classes', type: JavaExec) {
-		main = 'org.springframework.xd.gemfire.CacheServer'
+		main = 'org.springframework.xd.gemfire.server.CacheServer'
 		classpath = sourceSets.test.runtimeClasspath
 		if (rootProject.hasProperty('config')) {
 			args = [
@@ -828,8 +890,8 @@ project('spring-xd-module') {
 		compile "org.springframework.boot:spring-boot-autoconfigure"
 		compile "org.springframework.boot:spring-boot-loader"
 		compile "com.fasterxml.jackson.core:jackson-databind"
+		compile "org.slf4j:slf4j-api"
 		compile project(':spring-xd-module-spi')
-		compile project(':spring-xd-spark-streaming')
 	}
 }
 
@@ -849,10 +911,14 @@ project('spring-xd-spark-streaming') {
 	dependencies {
 		compile("org.apache.spark:spark-streaming_$sparkScalaVersion:$sparkVersion") {
 			exclude group: 'hsqldb'
+			exclude module: 'htrace-core'
 			exclude group: 'com.esotericsoftware.kryo', module: 'kryo'
 		}
 		compile "org.springframework.integration:spring-integration-core"
 		compile project(":spring-xd-module-spi")
+		configurations.compile.exclude(group: 'org.apache.curator', module: 'curator-framework')
+		configurations.compile.exclude(group: 'org.apache.curator', module: 'curator-recipes')
+		configurations.compile.exclude(group: 'org.apache.curator', module: 'curator-client')
 	}
 }
 
@@ -872,6 +938,9 @@ project('spring-xd-spark-streaming-tests') {
 
 	test {
 		forkEvery = 1
+		onlyIf {
+			!Boolean.getBoolean('disable_spark_tests')
+		}
 		if (System.getProperty('os.name').startsWith('Windows')) {
 			if (project.hasProperty('hadoop.home.dir')) {
 				systemProperty "hadoop.home.dir", getProperty('hadoop.home.dir')
@@ -891,6 +960,8 @@ project('spring-xd-tuple') {
 		compile "org.springframework.integration:spring-integration-core"
 		compile "org.springframework.batch:spring-batch-infrastructure"
 		compile "org.springframework:spring-jdbc"
+		compile "com.esotericsoftware:kryo-shaded"
+		compile "org.slf4j:slf4j-api"
 	}
 }
 
@@ -903,6 +974,7 @@ project('spring-xd-rest-client') {
 		compile "org.codehaus.jackson:jackson-core-asl"
 		compile "joda-time:joda-time"
 		compile "org.apache.httpcomponents:httpclient"
+		testRuntime "javax.servlet:javax.servlet-api:3.1.0"
 	}
 }
 
@@ -924,18 +996,17 @@ project('spring-xd-rest-domain') {
 	}
 }
 
-project('spring-xd-spi-common') {
-	description = 'Spring XD SPI shared code'
-}
-
 project('spring-xd-messagebus-spi') {
 	description = 'Spring XD MessageBus Service Provider Interface'
 	dependencies {
-		compile project(':spring-xd-spi-common')
 		compile "org.springframework:spring-messaging"
+		compile "org.springframework:spring-web"
 		compile "org.springframework.retry:spring-retry"
 		compile "org.springframework.integration:spring-integration-core"
 		compile "com.fasterxml.jackson.core:jackson-databind"
+		compile "org.apache.httpcomponents:httpclient"
+		compile "com.esotericsoftware:kryo-shaded"
+		compile "org.slf4j:slf4j-api"
 	}
 }
 
@@ -960,6 +1031,8 @@ project('spring-xd-messagebus-rabbit') {
 		compile project(':spring-xd-messagebus-spi')
 		compile "org.springframework.integration:spring-integration-amqp"
 		compile "org.springframework.boot:spring-boot-autoconfigure"
+		compile "org.springframework:spring-web"
+		testCompile project(":spring-xd-test")
 	}
 }
 
@@ -968,7 +1041,7 @@ project('spring-xd-messagebus-kafka') {
 	dependencies {
 		compile project(':spring-xd-messagebus-spi')
 		compile("org.springframework.integration:spring-integration-kafka:$springIntegrationKafkaVersion") {
-			exclude group: 'org.apache.velocity', module: 'velocity'
+			exclude group: 'org.apache.avro', module: 'avro-compiler'
 		}
 	}
 }
@@ -977,11 +1050,10 @@ project('spring-xd-ui') {
 	description = 'Spring XD UI'
 
 	dependencies {
-		compile "org.springframework.boot:spring-boot-starter-thymeleaf"
 		compile "org.springframework.boot:spring-boot-starter-security"
+		compile "org.springframework.boot:spring-boot-starter-web"
+		compile "org.springframework.session:spring-session"
 		compile "org.springframework.xd:spring-xd-admin-ui-client:$xdAdminUIVersion"
-		compile "log4j:log4j"
-		runtime "org.slf4j:slf4j-log4j12"
 	}
 
 }
@@ -989,10 +1061,16 @@ project('spring-xd-ui') {
 project('spring-xd-test') {
 	description = 'Spring XD Test'
 	dependencies {
-		compile "org.springframework.integration:spring-integration-test"
+		compile ("org.springframework.integration:spring-integration-test"){
+			exclude group: 'org.apache.avro', module: 'avro-compiler'
+			
+		}
 		compile "org.springframework.integration:spring-integration-amqp"
 		compile "org.springframework.integration:spring-integration-redis"
 		compile "org.springframework.integration:spring-integration-mqtt"
+		compile ("org.springframework.integration:spring-integration-kafka:$springIntegrationKafkaVersion") {
+			exclude group: 'org.apache.avro', module: 'avro-compiler'
+		}
 
 		compile("org.springframework.data:spring-data-hadoop")
 		// Exclude transitive dependencies
@@ -1027,6 +1105,7 @@ project('spring-xd-test') {
 		compile "commons-io:commons-io"
 		compile "org.apache.kafka:kafka_2.10:${kafkaVersion}"
 		compile "org.apache.kafka:kafka_2.10:${kafkaVersion}:test"
+		compile "org.apache.kafka:kafka-clients:${kafkaVersion}"
 		compile "org.apache.curator:curator-test:${curatorVersion}"
 		compile project(':spring-xd-module')
 	}
@@ -1086,6 +1165,7 @@ project('spring-xd-shell') {
 			exclude group: 'net.java.dev.jets3t', module: 'jets3t'
 			exclude group: 'com.jcraft', module: 'jsch'
 			exclude group: 'junit', module: 'junit'
+			exclude group: 'org.apache.htrace', module: 'htrace-core'
 			//TODO: Not sure this is doing anything
 			exclude group: 'hsqldb'
 			exclude group: 'jline', module: 'jline'
@@ -1096,21 +1176,23 @@ project('spring-xd-shell') {
 		compile "commons-io:commons-io"
 		configurations.compile.exclude(group: "xerces")
 
-		runtime "org.slf4j:jcl-over-slf4j"
-		runtime "org.slf4j:slf4j-log4j12"
-		runtime "log4j:log4j"
+		runtime 'ch.qos.logback:logback-classic'
+
 		testCompile project(":spring-xd-test-fixtures")
 		testCompile project(":spring-xd-dirt")
 		testCompile "org.springframework.integration:spring-integration-ftp"
 		testCompile "org.apache.ftpserver:ftpserver-core:$ftpServerVersion"
 		testCompile "org.springframework.integration:spring-integration-sftp"
 		testCompile "org.apache.sshd:sshd-core:$apacheSshdVersion"
-		testCompile("org.springframework.integration:spring-integration-kafka:$springIntegrationKafkaVersion")
+		testCompile ("org.springframework.integration:spring-integration-kafka:$springIntegrationKafkaVersion") {
+			exclude group: 'org.apache.avro', module: 'avro-compiler'
+		}
 		testCompile project(":spring-xd-test")
+		testCompile "io.projectreactor:reactor-stream" // TODO: remove when INT-3766 is resolved
 	}
 
 	// skip the startScripts task to avoid default start script generation
-	startScripts.setEnabled(false)
+	startScripts.enabled = false
 
 	task scriptFiles {
 		def scripts = file("$rootDir/scripts/shell")
@@ -1137,16 +1219,24 @@ project('spring-xd-batch') {
 		compile "org.springframework.boot:spring-boot-actuator"
 		compile "org.springframework:spring-jdbc"
 		compile "org.springframework.batch:spring-batch-core"
+		compile "org.slf4j:slf4j-api"
 	}
 	apply plugin: 'application'
 	// skip the startScripts task to avoid default start script generation
-	startScripts.setEnabled(false)
+	startScripts.enabled = false
 
 	task scriptFiles {
 		def scripts = file("$rootDir/scripts/hsqldb")
 		outputs.dir scripts
 	}
 	applicationDistribution.from(scriptFiles) { into "bin" }
+
+	task configFiles {
+		def configs = file("$rootDir/spring-xd-batch/config")
+		outputs.dir configs
+	}
+
+	applicationDistribution.from(configFiles) { into "config" }
 }
 
 // Fixtures
@@ -1163,17 +1253,15 @@ project('spring-xd-test-fixtures') {
 		compile "com.fasterxml.jackson.core:jackson-databind"
 		compile "org.springframework:spring-jms"
 		compile "org.apache.activemq:activemq-client"
+		compile "org.apache.ftpserver:ftpserver-core:$ftpServerVersion"
 		compile "org.springframework:spring-web"
+		compile "com.esotericsoftware:kryo-shaded"
 		compile("org.springframework.data:spring-data-mongodb") {
 			exclude group: 'org.slf4j', module: 'jcl-over-slf4j'
 			exclude group: 'org.slf4j', module: 'slf4j-log4j12'
 			exclude group: 'org.springframework', module: 'spring-beans'
 			exclude group: 'org.springframework', module: 'spring-core'
 		}
-
-		runtime "log4j:log4j",
-				"org.slf4j:jcl-over-slf4j",
-				"org.slf4j:slf4j-log4j12"
 	}
 }
 
@@ -1208,8 +1296,8 @@ project('spring-xd-integration-test') {
 		compile "org.apache.jclouds.provider:aws-ec2:$jcloudsVersion"
 		compile "org.apache.jclouds.driver:jclouds-sshj:$jcloudsVersion"
 		compile "com.fasterxml.jackson.core:jackson-databind"
-		compile("org.apache.hadoop:hadoop-common:$hadoop26Version")
-		compile("org.apache.hadoop:hadoop-client:$hadoop26Version")
+		compile("org.apache.hadoop:hadoop-common:$hadoop27Version")
+		compile("org.apache.hadoop:hadoop-client:$hadoop27Version")
 		compile "com.google.guava:guava:$oldGuavaVersion"
 		compile("org.springframework.data:spring-data-mongodb") {
 			exclude group: 'org.slf4j', module: 'jcl-over-slf4j'
@@ -1227,9 +1315,6 @@ project('spring-xd-integration-test') {
 		testCompile("org.springframework.data:spring-data-hadoop") {
 			exclude group: 'org.apache.hadoop'
 		}
-		runtime "log4j:log4j",
-				"org.slf4j:jcl-over-slf4j",
-				"org.slf4j:slf4j-log4j12"
 
 		testCompile("org.apache.ftpserver:ftpserver-core:${apacheFtpServerVersion}")
 	}
@@ -1271,11 +1356,31 @@ project('spring-xd-distributed-test') {
 		compile "com.oracle.tools:oracle-tools-core:$oracleToolsVersion"
 		compile "com.oracle.tools:oracle-tools-testing-support:$oracleToolsVersion"
 		testCompile "junit:junit"
-		runtime "log4j:log4j",
-				"org.slf4j:jcl-over-slf4j",
-				"org.slf4j:slf4j-log4j12"
 	}
+}
 
+//Spring XD Performance Benchmarks
+project('spring-xd-benchmark') {
+       description = 'Spring XD benchmark tests'
+       test {
+          onlyIf {
+               Boolean.getBoolean('run_benchmark_tests')
+          }
+          //redirect output to the console.
+          testLogging {
+               events "passed", "skipped", "failed", "standardOut", "standardError"
+          }
+     }
+
+     //force tests to always run
+     test.dependsOn cleanTest
+
+     dependencies {
+            testCompile project(":spring-xd-test-fixtures")
+            testCompile project(":spring-xd-test")
+            testCompile project(":spring-xd-dirt")
+            testCompile "junit:junit"
+       }
 }
 
 apply plugin: 'sonar-runner'
@@ -1305,7 +1410,9 @@ apply from: 'gradle/build-dist.gradle'
 
 task wrapper(type: Wrapper) {
 	description = "Generates build_xd[.bat] scripts"
-	gradleVersion = "1.12"
+	//see http://stackoverflow.com/questions/29113972/spring-boot-gradle-plugin-application-plugin-and-gradle-2-3-wrapper
+	//before upgrading to 2.3
+	gradleVersion = "2.2"
 	scriptFile = "gradle/build_xd"
 }
 

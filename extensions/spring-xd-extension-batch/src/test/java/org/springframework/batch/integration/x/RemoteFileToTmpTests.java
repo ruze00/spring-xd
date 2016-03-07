@@ -31,14 +31,13 @@ import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.commons.net.ftp.FTPFile;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
@@ -60,6 +59,7 @@ import org.springframework.integration.support.MessageBuilder;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessagingException;
 import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 import org.springframework.util.Assert;
 import org.springframework.util.FileCopyUtils;
@@ -72,6 +72,7 @@ import org.springframework.xd.dirt.integration.bus.local.LocalMessageBus;
  * @author Gary Russell
  */
 @ContextConfiguration
+@TestPropertySource(properties = { "restartable = false", "partitionResultsTimeout = 3600000", "xd.config.home = file:../../config" })
 @RunWith(SpringJUnit4ClassRunner.class)
 public class RemoteFileToTmpTests {
 
@@ -166,7 +167,7 @@ public class RemoteFileToTmpTests {
 	 */
 	public static class RemoteFileToTmpDirTasklet implements Tasklet {
 
-		private final Log logger = LogFactory.getLog(this.getClass());
+		private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
 		private final RemoteFileTemplate<?> template;
 

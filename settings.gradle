@@ -1,11 +1,10 @@
 rootProject.name = 'spring-xd'
 
-include 'spring-xd-spi-common'
-
 include 'spring-xd-analytics'
 include 'spring-xd-analytics-ml'
 
 include 'spring-xd-rxjava'
+include 'spring-xd-reactor'
 
 include 'spring-xd-messagebus-spi'
 include 'spring-xd-messagebus-local'
@@ -21,11 +20,11 @@ include 'spring-xd-module'
 include 'spring-xd-module-spi'
 include 'spring-xd-tuple'
 include 'spring-xd-hadoop'
-include 'spring-xd-hadoop:hadoop25'
-include 'spring-xd-hadoop:hadoop26'
+include 'spring-xd-hadoop:hadoop27'
 include 'spring-xd-hadoop:cdh5'
 include 'spring-xd-hadoop:hdp22'
 include 'spring-xd-hadoop:phd21'
+include 'spring-xd-hadoop:phd30'
 include 'spring-xd-yarn:spring-xd-yarn-client'
 include 'spring-xd-yarn:spring-xd-yarn-appmaster'
 include 'spring-xd-spark-streaming'
@@ -39,6 +38,7 @@ include 'spring-xd-integration-test'
 include 'spring-xd-integration-test:acceptance-test-sparkapp'
 include 'spring-xd-test-fixtures'
 include 'spring-xd-distributed-test'
+include 'spring-xd-benchmark'
 include 'documentation-toolchain'
 
 ['source', 'processor', 'sink', 'job'].each {kind->
@@ -54,7 +54,7 @@ include 'documentation-toolchain'
 // This prevents the detection of the extensions/ directory itself
 // as a project (which it is not) and avoids manual listing of projects
 new File(rootDir, 'extensions').eachDir { dir ->
-	if (new File(dir, 'src/main/java').exists()) {
+	if (new File(dir, 'src/main/java').exists() || new File(dir, 'src/test/java').exists()) {
 		include ":${dir.name}"
 		project(":${dir.name}").projectDir = dir
 	}

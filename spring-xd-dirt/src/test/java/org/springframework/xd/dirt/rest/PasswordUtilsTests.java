@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 the original author or authors.
+ * Copyright 2014-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@ package org.springframework.xd.dirt.rest;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
+
+import java.util.Properties;
 
 import org.junit.Test;
 
@@ -68,13 +70,15 @@ public class PasswordUtilsTests {
 
 	@Test
 	public void testMaskStreamDefinitionWithOnePasswordParameter2() {
-		final String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --driverClassName=org.postgresql.Driver --password=12345678");
+		final String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --driverClassName=org.postgresql.Driver --password=12345678");
 		assertEquals("filejdbc --driverClassName=org.postgresql.Driver --password=********", maskedPassword);
 	}
 
 	@Test
 	public void testMaskStreamDefinitionWithOnePasswordParameter3() {
-		final String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --driverClassName=org.postgresql.Driver --passwd=12345678");
+		final String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --driverClassName=org.postgresql.Driver --passwd=12345678");
 		assertEquals("filejdbc --driverClassName=org.postgresql.Driver --passwd=********", maskedPassword);
 	}
 
@@ -89,7 +93,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithPasswordParameterInMiddle() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --password=12345678 --driverClassName=org.postgresql.Driver");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --password=12345678 --driverClassName=org.postgresql.Driver");
 		assertEquals("filejdbc --password=******** --driverClassName=org.postgresql.Driver", maskedPassword);
 	}
 
@@ -98,7 +103,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithMultiplePasswordParametersAndMixedCase() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("mystream -- password=12 --PASSword=  1234 --PASSWORD=  1234");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"mystream -- password=12 --PASSword=  1234 --PASSWORD=  1234");
 		assertEquals("mystream -- password=** --PASSword=  **** --PASSWORD=  ****", maskedPassword);
 	}
 
@@ -107,7 +113,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithUnicodePasswordParameter() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("mystream --password=\u0411\u0435\u0440\u043b\u0438\u043d");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"mystream --password=\u0411\u0435\u0440\u043b\u0438\u043d");
 		assertEquals("mystream --password=******", maskedPassword);
 	}
 
@@ -125,7 +132,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithPasswordParameterAtEnd() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --driverClassName=org.postgresql.Driver --passwd=12345678");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --driverClassName=org.postgresql.Driver --passwd=12345678");
 		assertEquals("filejdbc --driverClassName=org.postgresql.Driver --passwd=********", maskedPassword);
 	}
 
@@ -134,7 +142,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithPasswordParameterAtEndContainingUnderscore() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --driverClassName=org.postgresql.Driver --password=12345678_abcd");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --driverClassName=org.postgresql.Driver --password=12345678_abcd");
 		assertEquals("filejdbc --driverClassName=org.postgresql.Driver --password=*************", maskedPassword);
 	}
 
@@ -143,7 +152,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithPasswordParameterAtEndContainingCurrencySymbol() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --driverClassName=org.postgresql.Driver --password=12345678$a\u20acbc\u00a5d");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --driverClassName=org.postgresql.Driver --password=12345678$a\u20acbc\u00a5d");
 		assertEquals("filejdbc --driverClassName=org.postgresql.Driver --password=***************", maskedPassword);
 	}
 
@@ -152,7 +162,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithPasswordParameterAtEndWrappedInQuotes() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --driverClassName=org.postgresql.Driver --password=\"abcd\"");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --driverClassName=org.postgresql.Driver --password=\"abcd\"");
 		assertEquals("filejdbc --driverClassName=org.postgresql.Driver --password=\"****\"", maskedPassword);
 	}
 
@@ -161,7 +172,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithPasswordParameterAtEndWrappedInQuotesContainingSpaces() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --driverClassName=org.postgresql.Driver --password=\"ab  cd\"");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --driverClassName=org.postgresql.Driver --password=\"ab  cd\"");
 		assertEquals("filejdbc --driverClassName=org.postgresql.Driver --password=\"******\"", maskedPassword);
 	}
 
@@ -170,7 +182,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithPasswordParameterAtEndWrappedInQuotesContainingDashes() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --driverClassName=org.postgresql.Driver --password=\"ab---cd\"");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --driverClassName=org.postgresql.Driver --password=\"ab---cd\"");
 		assertEquals("filejdbc --driverClassName=org.postgresql.Driver --password=\"*******\"", maskedPassword);
 	}
 
@@ -179,7 +192,8 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithPasswordParameterInMiddleWrappedInQuotes() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --password=\"12345678\" --driverClassName=\"org.postgresql.Driver\"");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --password=\"12345678\" --driverClassName=\"org.postgresql.Driver\"");
 		assertEquals("filejdbc --password=\"********\" --driverClassName=\"org.postgresql.Driver\"", maskedPassword);
 	}
 
@@ -188,9 +202,86 @@ public class PasswordUtilsTests {
 	 */
 	@Test
 	public void testMaskStreamDefinitionWithMultiplePasswordParametersWrappedInQuotes() {
-		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("filejdbc --password=\"12345678\" --driverClassName=\"org.postgresql.Driver\" --passwd=\"12345678\"");
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition(
+				"filejdbc --password=\"12345678\" --driverClassName=\"org.postgresql.Driver\" --passwd=\"12345678\"");
 		assertEquals(
 				"filejdbc --password=\"********\" --driverClassName=\"org.postgresql.Driver\" --passwd=\"********\"",
 				maskedPassword);
+	}
+
+	@Test
+	public void testMaskStreamDefinitionWithCustomNamedPasswordParameterPrefixOnly() {
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("time | cpp --mypassword=123 | null");
+		assertEquals(
+				"time | cpp --mypassword=*** | null",
+				maskedPassword);
+	}
+
+	@Test
+	public void testMaskStreamDefinitionWithCustomNamedPasswordParameterSuffixOnly() {
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("time | cpp --passwordmy=123 | null");
+		assertEquals(
+				"time | cpp --passwordmy=*** | null",
+				maskedPassword);
+	}
+
+	@Test
+	public void testMaskStreamDefinitionWithCustomNamedPasswordParameterSuffixOnly2() {
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("time | cpp --passwordmy    =123 | null");
+		assertEquals(
+				"time | cpp --passwordmy    =*** | null",
+				maskedPassword);
+	}
+
+	@Test
+	public void testMaskStreamDefinitionWithCustomNamedPasswordParameterPrefixAndSuffix() {
+		String maskedPassword = PasswordUtils.maskPasswordsInDefinition("time | cpp --mypassworditis=123 | null");
+		assertEquals(
+				"time | cpp --mypassworditis=*** | null",
+				maskedPassword);
+	}
+
+	@Test
+	public void testMaskString() {
+		String maskedPassword = PasswordUtils.maskString("12345");
+		assertEquals("*****", maskedPassword);
+	}
+
+	@Test
+	public void testMaskStringWithNullString() {
+		try {
+			PasswordUtils.maskString(null);
+		}
+		catch (IllegalArgumentException e) {
+			assertEquals("'stringToMask' must not be null.", e.getMessage());
+			return;
+		}
+		fail("Expected an IllegalArgumentException to be thrown");
+	}
+
+	@Test
+	public void testMaskPropertiesIfNecessaryWithNullProperties() {
+		try {
+			PasswordUtils.maskPropertiesIfNecessary(null);
+		}
+		catch (IllegalArgumentException e) {
+			assertEquals("'properties' must not be null.", e.getMessage());
+			return;
+		}
+		fail("Expected an IllegalArgumentException to be thrown");
+	}
+
+	@Test
+	public void testMaskPropertiesIfNecessary() {
+		final Properties properties = new Properties();
+		properties.setProperty("nothingtomask", "1234");
+		properties.setProperty("mypassword", "1234");
+		properties.setProperty("passwdisMINE", "1234");
+
+		PasswordUtils.maskPropertiesIfNecessary(properties);
+
+		assertEquals("1234", properties.getProperty("nothingtomask"));
+		assertEquals("****", properties.getProperty("mypassword"));
+		assertEquals("****", properties.getProperty("passwdisMINE"));
 	}
 }

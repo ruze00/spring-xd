@@ -1,6 +1,8 @@
 /*
  * Tasks related to building the Spring XD distribution
 */
+apply plugin: 'com.jfrog.artifactory'
+apply plugin: 'maven-publish'
 def dirtJars = []
 def loadDirtJars = {
 	if (dirtJars.size == 0) {
@@ -9,6 +11,44 @@ def loadDirtJars = {
 	}
 	dirtJars
 }
+
+def customizePom = {
+	description project.description
+        name project.name
+	url linkHomepage
+	organization {
+		name 'Spring by Pivotal'
+		url 'https://spring.io'
+	}
+	licenses {
+		license {
+			name 'The Apache Software License, Version 2.0'
+			url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+			distribution 'repo'
+		}
+	}
+
+	scm {
+		url linkScmUrl
+		connection linkScmConnection
+		developerConnection linkScmDevConnection
+	}
+
+	developers {
+		xdDevelopers.each { dev ->
+			developer {
+				id dev.id
+				name dev.name
+				if (dev.email) {
+					email dev.email
+				}
+			}
+		}
+	}
+}
+
+// This is needed to generate elements that are also defined methods in MavenPublication
+customizePom.resolveStrategy = Closure.DELEGATE_FIRST
 
 task copyRedisInstall(type: Copy, dependsOn: ":redis:bundleRedis") {
 	from "$rootDir/redis/build"
@@ -83,13 +123,15 @@ task copyXDShellInstall(type: Copy, dependsOn: ["copyXDInstall", ":spring-xd-she
 
 task copyHadoopLibs {}
 
-[
-	'hadoop25',
-	'hadoop26',
+def hadoopDistros = [
+	'hadoop27',
 	'cdh5',
 	'hdp22',
-	'phd21'
-].each { distro ->
+	'phd21',
+	'phd30'
+]
+
+hadoopDistros.each { distro ->
 	tasks.create(name: "copyHadoopLibs-$distro", type: Copy) {
 		from project(":spring-xd-hadoop:$distro").copyToLib.outputs.files
 		into "$buildDir/dist/spring-xd/xd/lib/$distro"
@@ -108,13 +150,13 @@ task copyYarnInstallDirt(type: Copy, dependsOn: [":spring-xd-dirt:build", ":spri
 	into "$buildDir/dist/spring-xd-yarn/xd-yarn"
 	exclude "**/bin/*"
 	exclude "**/config/servers.yml"
-	exclude "**/config/xd-admin-logger.properties"
-	exclude "**/config/xd-container-logger.properties"
+	exclude "**/config/xd-*-logger.groovy"
 	exclude "**/config/modules"
 	exclude "**/lib/hadoop-*.jar"
 	exclude "**/lib/spring-data-hadoop-*.jar"
 	exclude "**/lib/slf4j-log4j12-*.jar"
 	exclude "**/lib/log4j-*.jar"
+	exclude "**/lib/logback-*.jar"
 }
 
 task copyYarnInstallMessageBusLibs(type: Copy, dependsOn: ["copyYarnInstallDirt"]) {
@@ -204,16 +246,17 @@ task distShellZip(type: Zip, dependsOn: [copyInstall], overwrite: true) {
         }
         // copy hadoop distro jars
         [
-                'hadoop25',
-                'hadoop26',
+                'hadoop27',
                 'cdh5',
                 'hdp22',
-                'phd21'
+                'phd21',
+                'phd30'
         ].each { distro ->
                         from("$buildDir/dist/spring-xd/xd/lib/$distro") {
                             include "hadoop-auth-*.jar"
                             include "hadoop-common-*.jar"
                             include "hadoop-hdfs-*.jar"
+                            include "htrace-core-*"
                             include "hadoop-mapreduce-client-core-*.jar"
                             include "protobuf-java-*.jar"
                             into "${baseDir}/lib/$distro/"
@@ -231,7 +274,7 @@ task yarnZip(type: Zip, dependsOn: [copyInstall], overwrite: true) {
 	from("$buildDir/dist/spring-xd-yarn/xd-yarn/lib") {
 		into "/lib"
 	}
-	from("$buildDir/dist/spring-xd/xd/lib/hadoop26") {
+	from("$buildDir/dist/spring-xd/xd/lib/hadoop27") {
 		include "spring-data-hadoop-*.jar"
 		into "/lib"
 	}
@@ -316,14 +359,71 @@ task distYarnZip(type: Zip, dependsOn: [copyInstall, yarnZip, yarnModulesZip, ya
 	}
 }
 
-artifacts {
-	archives distZip
-	archives distYarnZip
-	archives docsZip
-	archives distShellZip
-}
-
 task dist(dependsOn: assemble) {
 	group = 'Distribution'
 	description = 'Builds XD binary and reference docs distribution archives.'
+	artifacts {
+		archives distZip
+		archives distYarnZip
+		archives docsZip
+		archives distShellZip
+	}
+}
+
+def excludedMavenProjects = hadoopDistros << 'documentation-toolchain' << rootProject.name
+
+artifactory {
+	contextUrl = 'http://repo.spring.io'
+	publish {
+		repository {
+			repoKey = 'libs-snapshot-local' // The Artifactory repository key to publish to
+			//username = 
+			//password = 
+		}
+		defaults {
+			// Reference to Gradle publications defined in the build script.
+			// This is how we tell the Artifactory Plugin which artifacts should be
+			// published to Artifactory.
+			if (!excludedMavenProjects.contains(project.name)) {
+				publications('mavenCustom')
+				publishArtifacts = true
+				properties {
+					archives '*:*:*:*@zip', 'zip.name':'spring-xd', 'zip.displayname':'Spring XD', 'zip.deployed':false
+					archives '*:*:*:docs@zip', 'zip.type':'docs'
+					archives '*:*:*:dist@zip', 'zip.type':'dist'
+				}
+			}
+		}
+	}
+	resolve {
+		repoKey = 'libs-snapshot'
+	}
+}
+
+publishing {
+	publications {
+		mavenCustom(MavenPublication) {
+			pom.withXml {
+
+				asNode().version + customizePom
+			}
+		}
+		archives(MavenPublication) {
+			artifact distZip
+			artifact distYarnZip
+			artifact docsZip
+			artifact distShellZip
+		}
+	}
+}
+
+artifactoryPublish {
+	publications('archives')
+	publishArtifacts = true
+	publishPom = false
+	properties {
+		archives '*:*:*:*@zip', 'zip.name':'spring-xd', 'zip.displayname':'Spring XD', 'zip.deployed':false
+		archives '*:*:*:docs@zip', 'zip.type':'docs'
+		archives '*:*:*:dist@zip', 'zip.type':'dist'
+	}
 }

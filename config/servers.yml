@@ -25,6 +25,9 @@
 #      compressionLevel:            1
             # bus-level property, applies only when 'compress=true' for a stream module
             # See java.util.zip.Deflater; 1=BEST_SPEED, 9=BEST_COMPRESSION, ...
+#      longStringLimit:             8192
+#            # Headers longer than this will not be converted to String and will be a
+#            # DataInputStream - such headers will NOT be properly converted back on output.
 #      default:
 #        ackMode:                   AUTO
             # Valid: AUTO (container acks), NONE (broker acks), MANUAL (consumer acks).
@@ -43,6 +46,7 @@
 #        compress:                  false
 #        concurrency:               1
 #        deliveryMode:              PERSISTENT
+#        durableSubscription:       false
 #        maxAttempts:               3
 #        maxConcurrency:            1
 #        prefix:                    xdbus.
@@ -58,7 +62,7 @@
 
 #    redis:
 #      headers:
-            # comman-delimited list of additional (string-valued) header names to transport
+            # comma-delimited list of additional header names to transport
 #      default:
             # default bus properties, if not specified at the module level
 #        backOffInitialInterval:    1000
@@ -69,37 +73,41 @@
 #    kafka:
 #      brokers:                                 localhost:9092
 #      zkAddress:                               localhost:2181
-#      numOfKafkaPartitionsForCountEqualsZero:  10
+#      mode:                                    embeddedHeaders
+#      offsetManagement:                        kafkaTopic
+#      headers:
+            # comma-delimited list of additional header names to transport
 #      socketBufferSize:                        2097152
 #      offsetStoreTopic:                        SpringXdOffsets
 #      offsetStoreSegmentSize:                  25000000
 #      offsetStoreRetentionTime:                60000
 #      offsetStoreRequiredAcks:                 1
 #      offsetStoreMaxFetchSize:                 1048576
-#      offsetStoreBatchSize:                    200
-#      offsetStoreBatchEnabled:                 false
+#      offsetStoreBatchBytes:                   16384
 #      offsetStoreBatchTime:                    1000
 #      offsetUpdateTimeWindow:                  10000
 #      offsetUpdateCount:                       0
 #      offsetUpdateShutdownTimeout:             2000
 #      default:
-#        batchingEnabled:           false
-#        batchSize:                 200
-#        batchTimeout:              5000
+#        batchSize:                 16384
+#        batchTimeout:              0
 #        replicationFactor:         1
 #        concurrency:               1
 #        requiredAcks:              1
-#        compressionCodec:          default
-#        autoCommitEnabled:         true
-#        queueSize:                 1000
+#        compressionCodec:          none
+#        queueSize:                 8192 # must be a power of 2
+#        maxWait:                   100
 #        fetchSize:                 1048576
 #        minPartitionCount:         1
+#        durableSubscription:       false
+#        syncProducer:              false
+#        syncProducerTimeout:       5000
 
 #Disable batch database initialization
 #spring:
 #  batch:
 # Configure other Spring Batch repository values.  Most are typically not needed
-#    isolationLevel: ISOLATION_SERIALIZABLE
+#    isolationLevel: ISOLATION_READ_COMMITTED
 #    clobType:
 #    dbType:
 #    maxVarcharLength: 2500
@@ -130,7 +138,7 @@ xd:
 #Change database username and password
 #spring:
 #  datasource:
-#    url: jdbc:hsqldb:hsql://${hsql.server.host:localhost}:${hsql.server.port:9101}/${hsql.server.dbname:xdjob}
+#    url: jdbc:hsqldb:hsql://${hsql.server.host:localhost}:${hsql.server.port:9101}/${hsql.server.dbname:xdjob};sql.enforce_strict_size=true;hsqldb.tx=mvcc
 #    username: sa
 #    password:
 #    driverClassName: org.hsqldb.jdbc.JDBCDriver
@@ -154,6 +162,14 @@ xd:
 #    driverClassName: org.postgresql.Driver
 #    validationQuery: select 1
 
+#Config for use with Oracle - uncomment and edit with relevant values for your environment
+#spring:
+#  datasource:
+#    url: jdbc:oracle:thin:@//localhost:1521/orcl
+#    username: scott
+#    password: tiger
+#    driverClassName: oracle.jdbc.driver.OracleDriver
+#    validationQuery: select 1 from dual
 ---
 #ConnectionPoolSettings
 #spring:
@@ -234,12 +250,12 @@ xd:
 #       userSearchFilter: yourUserSearchFilter # e.g. uid={0}
 ---
 # Config to enable/disable JMX/jolokia endpoints
-XD_JMX_ENABLED: true
+XD_JMX_ENABLED: false
 endpoints:
   jolokia:
-    enabled: ${XD_JMX_ENABLED:true}
+    enabled: ${XD_JMX_ENABLED:false}
   jmx:
-    enabled: ${XD_JMX_ENABLED:true}
+    enabled: ${XD_JMX_ENABLED:false}
     uniqueNames: true
 
 # Config to enable the shutdown button on the UI
@@ -257,6 +273,11 @@ endpoints:
 #  redis:
 #   port: 6379
 #   host: 127.0.0.1
+#   pool:
+#     maxIdle: 8 # max idle connections in the pool
+#     minIdle: 0 # min idle connections in the pool
+#     maxActive: -1 # no limit to the number of active connections
+#     maxWait: 30000 # time limit to get a connection - only applies if maxActive is finite
 #   sentinel:
 #     master: mymaster
 #     nodes: 127.0.0.1:26379,127.0.0.1:26380,127.0.0.1:26381
@@ -266,15 +287,26 @@ endpoints:
 #  port: 9393
 
 ---
-# RabbitMQ properties
+#  Rabbit MQ Properties
+#
+#  NOTE: sslProperties is mutually exclusive with keyStore, keyStorePassphrase, trustStore, trustStorePassphrase.
+#  if you set inline properties, values in the properties file location given by 'sslProperties' will be ignored.
+#
 #spring:
 #  rabbitmq:
 #   addresses: localhost:5672
+#   adminAddresses: http://localhost:15672
+#   nodes: rabbit@localhost
 #   username: guest
 #   password: guest
 #   virtual_host: /
 #   useSSL: false
 #   sslProperties:
+#   ssl:
+#     keyStore:
+#     keyStorePassphrase:
+#     trustStore:
+#     trustStorePassphrase:
 
 
 ---
@@ -343,12 +375,15 @@ endpoints:
 #      basepackages: com.acme.xd.extensions
 #      locations: META-INF/spring-xd/ext
 ---
-#Custom module registry location
-#Any custom modules built can be placed into this configured location
+#Custom module registry settings
+#Any custom modules built can be placed into this configured home
 #The location must be set to a valid resource URL (file://, classpath:/ etc.,)
+#The 'requiresHashFiles` property is true by default. This may be set to `false` to allow manually copying module jars
+# or when using an existing custom module registry that does not contain .md5 files.
 #xd:
 #  customModule:
 #    home: file://mymodulehome
+#    requiresHashFiles: true
 
 ---
 # Pretty print JSON output
@@ -378,3 +413,14 @@ endpoints:
 #         backOffMaxInterval:        10000
 #         backOffMultiplier:         2.0
 #         maxAttempts:               5
+
+---
+# Kryo uses references by default. This value must be set to 'true' unless we know the payload types being serialized
+# do not contain circular refefences. Setting this value to 'false' disables references and improves performance
+# if they are not needed. See https://github.com/EsotericSoftware/kryo#references.
+#xd:
+#  codec:
+#     kryo:
+#       references: false
+
+---

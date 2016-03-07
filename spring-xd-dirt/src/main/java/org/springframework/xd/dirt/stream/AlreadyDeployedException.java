@@ -16,20 +16,18 @@
 
 package org.springframework.xd.dirt.stream;
 
-import org.springframework.xd.dirt.XDRuntimeException;
-
 /**
  * Thrown when an attempt is made to deploy a definition that is already deployed.
- * 
+ *
  * @author Eric Bottard
- * 
+ *
  */
 @SuppressWarnings("serial")
-public class AlreadyDeployedException extends XDRuntimeException {
+public class AlreadyDeployedException extends StreamException {
 
 	/**
 	 * Create a new exception.
-	 * 
+	 *
 	 * @param offendingName name of the definition that conflicts
 	 * @param message Exception message. Can use {@link String#format(String, Object...)} syntax to include the
 	 *        offendingName
@@ -41,7 +39,7 @@ public class AlreadyDeployedException extends XDRuntimeException {
 
 	/**
 	 * Create a new exception.
-	 * 
+	 *
 	 * @param offendingName name of the definition that conflicts
 	 * @param message Exception message. Can use {@link String#format(String, Object...)} syntax to include the
 	 *        offendingName

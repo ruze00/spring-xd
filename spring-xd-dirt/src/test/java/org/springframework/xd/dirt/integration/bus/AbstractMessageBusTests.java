@@ -16,42 +16,33 @@
 
 package org.springframework.xd.dirt.integration.bus;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-
 import org.junit.After;
 import org.junit.Test;
-
 import org.springframework.beans.DirectFieldAccessor;
 import org.springframework.http.MediaType;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.channel.QueueChannel;
 import org.springframework.integration.channel.interceptor.WireTap;
+import org.springframework.integration.codec.Codec;
+import org.springframework.integration.codec.kryo.PojoCodec;
 import org.springframework.integration.support.MessageBuilder;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHeaders;
+import org.springframework.xd.dirt.integration.bus.MessageBus.Capability;
 import org.springframework.xd.dirt.integration.bus.local.LocalMessageBus;
-import org.springframework.xd.dirt.integration.bus.serializer.AbstractCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.CompositeCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.MultiTypeCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.kryo.PojoCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.kryo.TupleCodec;
-import org.springframework.xd.tuple.Tuple;
+import org.springframework.xd.tuple.serializer.kryo.TupleKryoRegistrar;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Properties;
+
+import static org.junit.Assert.*;
 
 /**
  * @author Gary Russell
  * @author Ilayaperumal Gopinathan
+ * @author David Turanski
  */
 public abstract class AbstractMessageBusTests {
 
@@ -86,7 +77,8 @@ public abstract class AbstractMessageBusTests {
 		QueueChannel moduleInputChannel = new QueueChannel();
 		messageBus.bindProducer("foo.0", moduleOutputChannel, null);
 		messageBus.bindConsumer("foo.0", moduleInputChannel, null);
-		Message<?> message = MessageBuilder.withPayload("foo").setHeader(MessageHeaders.CONTENT_TYPE, "foo/bar").build();
+		Message<?> message = MessageBuilder.withPayload("foo").setHeader(MessageHeaders.CONTENT_TYPE,
+				"foo/bar").build();
 		// Let the consumer actually bind to the producer before sending a msg
 		busBindUnbindLatency();
 		moduleOutputChannel.send(message);
@@ -133,10 +125,13 @@ public abstract class AbstractMessageBusTests {
 		moduleOutputChannel.addInterceptor(new WireTap(tapChannel));
 		messageBus.bindPubSubProducer("tap:baz.http", tapChannel, null);
 		// A new module is using the tap as an input channel
-		messageBus.bindPubSubConsumer("tap:baz.http", module2InputChannel, null);
+		String fooTapName = messageBus.isCapable(Capability.DURABLE_PUBSUB) ? "foo.tap:baz.http" : "tap:baz.http";
+		messageBus.bindPubSubConsumer(fooTapName, module2InputChannel, null);
 		// Another new module is using tap as an input channel
-		messageBus.bindPubSubConsumer("tap:baz.http", module3InputChannel, null);
-		Message<?> message = MessageBuilder.withPayload("foo").setHeader(MessageHeaders.CONTENT_TYPE, "foo/bar").build();
+		String barTapName = messageBus.isCapable(Capability.DURABLE_PUBSUB) ? "bar.tap:baz.http" : "tap:baz.http";
+		messageBus.bindPubSubConsumer(barTapName, module3InputChannel, null);
+		Message<?> message = MessageBuilder.withPayload("foo").setHeader(MessageHeaders.CONTENT_TYPE,
+				"foo/bar").build();
 		boolean success = false;
 		boolean retried = false;
 		while (!success) {
@@ -163,8 +158,9 @@ public abstract class AbstractMessageBusTests {
 			assertEquals("foo/bar", tapped2.getHeaders().get(MessageHeaders.CONTENT_TYPE));
 		}
 		// delete one tap stream is deleted
-		messageBus.unbindConsumer("tap:baz.http", module3InputChannel);
-		Message<?> message2 = MessageBuilder.withPayload("bar").setHeader(MessageHeaders.CONTENT_TYPE, "foo/bar").build();
+		messageBus.unbindConsumer(barTapName, module3InputChannel);
+		Message<?> message2 = MessageBuilder.withPayload("bar").setHeader(MessageHeaders.CONTENT_TYPE,
+				"foo/bar").build();
 		moduleOutputChannel.send(message2);
 
 		// other tap still receives messages
@@ -175,7 +171,7 @@ public abstract class AbstractMessageBusTests {
 		assertNull(module3InputChannel.receive(1000));
 
 		// when other tap stream is deleted
-		messageBus.unbindConsumer("tap:baz.http", module2InputChannel);
+		messageBus.unbindConsumer(fooTapName, module2InputChannel);
 		// Clean up as StreamPlugin would
 		messageBus.unbindConsumer("baz.0", moduleInputChannel);
 		messageBus.unbindProducer("baz.0", moduleOutputChannel);
@@ -193,7 +189,8 @@ public abstract class AbstractMessageBusTests {
 		QueueChannel module2InputChannel = new QueueChannel();
 		QueueChannel module3InputChannel = new QueueChannel();
 		// Create the tap first
-		messageBus.bindPubSubConsumer("tap:baz.http", module2InputChannel, null);
+		String fooTapName = messageBus.isCapable(Capability.DURABLE_PUBSUB) ? "foo.tap:baz.http" : "tap:baz.http";
+		messageBus.bindPubSubConsumer(fooTapName, module2InputChannel, null);
 
 		// Then create the stream
 		messageBus.bindProducer("baz.0", moduleOutputChannel, null);
@@ -202,8 +199,10 @@ public abstract class AbstractMessageBusTests {
 		messageBus.bindPubSubProducer("tap:baz.http", tapChannel, null);
 
 		// Another new module is using tap as an input channel
-		messageBus.bindPubSubConsumer("tap:baz.http", module3InputChannel, null);
-		Message<?> message = MessageBuilder.withPayload("foo").setHeader(MessageHeaders.CONTENT_TYPE, "foo/bar").build();
+		String barTapName = messageBus.isCapable(Capability.DURABLE_PUBSUB) ? "bar.tap:baz.http" : "tap:baz.http";
+		messageBus.bindPubSubConsumer(barTapName, module3InputChannel, null);
+		Message<?> message = MessageBuilder.withPayload("foo").setHeader(MessageHeaders.CONTENT_TYPE,
+				"foo/bar").build();
 		boolean success = false;
 		boolean retried = false;
 		while (!success) {
@@ -230,8 +229,9 @@ public abstract class AbstractMessageBusTests {
 			assertEquals("foo/bar", tapped2.getHeaders().get(MessageHeaders.CONTENT_TYPE));
 		}
 		// delete one tap stream is deleted
-		messageBus.unbindConsumer("tap:baz.http", module3InputChannel);
-		Message<?> message2 = MessageBuilder.withPayload("bar").setHeader(MessageHeaders.CONTENT_TYPE, "foo/bar").build();
+		messageBus.unbindConsumer(barTapName, module3InputChannel);
+		Message<?> message2 = MessageBuilder.withPayload("bar").setHeader(MessageHeaders.CONTENT_TYPE,
+				"foo/bar").build();
 		moduleOutputChannel.send(message2);
 
 		// other tap still receives messages
@@ -242,7 +242,7 @@ public abstract class AbstractMessageBusTests {
 		assertNull(module3InputChannel.receive(1000));
 
 		// when other tap stream is deleted
-		messageBus.unbindConsumer("tap:baz.http", module2InputChannel);
+		messageBus.unbindConsumer(fooTapName, module2InputChannel);
 		// Clean up as StreamPlugin would
 		messageBus.unbindConsumer("baz.0", moduleInputChannel);
 		messageBus.unbindProducer("baz.0", moduleOutputChannel);
@@ -252,20 +252,37 @@ public abstract class AbstractMessageBusTests {
 
 	@Test
 	public void testBadDynamic() throws Exception {
-		Properties properties = new Properties();
-		properties.setProperty(BusProperties.PARTITION_KEY_EXPRESSION, "'foo'");
 		MessageBus messageBus = getMessageBus();
-		try {
-			messageBus.bindDynamicProducer("queue:foo", properties);
-			fail("Exception expected");
-		}
-		catch (MessageBusException mbe) {
-			assertEquals("Failed to bind dynamic channel 'queue:foo' with properties {partitionKeyExpression='foo'}",
-					mbe.getMessage());
-			if (messageBus instanceof AbstractTestMessageBus) {
-				messageBus = ((AbstractTestMessageBus) messageBus).getCoreMessageBus();
+		// Natively partitioned buses can specify a partitioning key on any output
+		if (!getMessageBus().isCapable(Capability.NATIVE_PARTITIONING)) {
+			Properties properties = new Properties();
+			properties.setProperty(BusProperties.PARTITION_KEY_EXPRESSION, "'foo'");
+			try {
+				messageBus.bindDynamicProducer("queue:foo", properties);
+				fail("Exception expected");
+			} catch (MessageBusException mbe) {
+				assertEquals("Failed to bind dynamic channel 'queue:foo' with properties {partitionKeyExpression='foo'}",
+						mbe.getMessage());
+				if (messageBus instanceof AbstractTestMessageBus) {
+					messageBus = ((AbstractTestMessageBus) messageBus).getCoreMessageBus();
+				}
+				assertFalse(((MessageBusSupport) messageBus).getApplicationContext().containsBean("queue:foo"));
 			}
-			assertFalse(((MessageBusSupport) messageBus).getApplicationContext().containsBean("queue:foo"));
+		}
+		else {
+			try {
+				Properties properties = new Properties();
+				properties.setProperty(BusProperties.MAX_ATTEMPTS, "'foo'");
+				messageBus.bindDynamicProducer("queue:foo", properties);
+				fail("Exception expected");
+			} catch (MessageBusException mbe) {
+				assertEquals("Failed to bind dynamic channel 'queue:foo' with properties {maxAttempts='foo'}",
+						mbe.getMessage());
+				if (messageBus instanceof AbstractTestMessageBus) {
+					messageBus = ((AbstractTestMessageBus) messageBus).getCoreMessageBus();
+				}
+				assertFalse(((MessageBusSupport) messageBus).getApplicationContext().containsBean("queue:foo"));
+			}
 		}
 	}
 
@@ -284,11 +301,9 @@ public abstract class AbstractMessageBusTests {
 		return (List<?>) accessor.getPropertyValue("bindings");
 	}
 
-	@SuppressWarnings({ "unchecked", "rawtypes" })
-	protected MultiTypeCodec<Object> getCodec() {
-		Map<Class<?>, AbstractCodec<?>> codecs = new HashMap<Class<?>, AbstractCodec<?>>();
-		codecs.put(Tuple.class, new TupleCodec());
-		return new CompositeCodec(codecs, new PojoCodec());
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	protected Codec getCodec() {
+		return new PojoCodec(new TupleKryoRegistrar());
 	}
 
 	protected abstract MessageBus getMessageBus() throws Exception;

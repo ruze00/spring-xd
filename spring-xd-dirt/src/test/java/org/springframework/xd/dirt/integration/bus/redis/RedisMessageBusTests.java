@@ -37,7 +37,6 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 
-import org.springframework.amqp.utils.test.TestUtils;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
@@ -45,9 +44,11 @@ import org.springframework.expression.Expression;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.endpoint.AbstractEndpoint;
 import org.springframework.integration.redis.inbound.RedisQueueMessageDrivenEndpoint;
+import org.springframework.integration.test.util.TestUtils;
 import org.springframework.messaging.support.GenericMessage;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.xd.dirt.integration.bus.Binding;
+import org.springframework.xd.dirt.integration.bus.BusProperties;
 import org.springframework.xd.dirt.integration.bus.EmbeddedHeadersMessageConverter;
 import org.springframework.xd.dirt.integration.bus.MessageBus;
 import org.springframework.xd.dirt.integration.bus.PartitionCapableBusTests;
@@ -163,7 +164,7 @@ public class RedisMessageBusTests extends PartitionCapableBusTests {
 		properties.put("partitionKeyExtractorClass", "foo");
 		properties.put("partitionSelectorExpression", "0");
 		properties.put("partitionSelectorClass", "foo");
-		properties.put("partitionCount", "1");
+		properties.put(BusProperties.NEXT_MODULE_COUNT, "2");
 
 		bus.bindProducer("props.0", new DirectChannel(), properties);
 		assertEquals(1, bindings.size());
@@ -179,7 +180,6 @@ public class RedisMessageBusTests extends PartitionCapableBusTests {
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
 					containsString("RedisMessageBus does not support producer properties: "),
-					containsString("partitionCount"),
 					containsString("partitionSelectorExpression"),
 					containsString("partitionKeyExtractorClass"),
 					containsString("partitionKeyExpression"),
@@ -193,7 +193,6 @@ public class RedisMessageBusTests extends PartitionCapableBusTests {
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
 					containsString("RedisMessageBus does not support producer properties: "),
-					containsString("partitionCount"),
 					containsString("partitionSelectorExpression"),
 					containsString("partitionKeyExtractorClass"),
 					containsString("partitionKeyExpression"),
@@ -233,7 +232,6 @@ public class RedisMessageBusTests extends PartitionCapableBusTests {
 		properties.put("partitionKeyExtractorClass", "foo");
 		properties.put("partitionSelectorExpression", "0");
 		properties.put("partitionSelectorClass", "foo");
-		properties.put("partitionCount", "1");
 		properties.put("partitionIndex", "0");
 		try {
 			bus.bindRequestor("dummy", new DirectChannel(), new DirectChannel(), properties);
@@ -242,7 +240,6 @@ public class RedisMessageBusTests extends PartitionCapableBusTests {
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
 					containsString("RedisMessageBus does not support producer properties: "),
-					containsString("partitionCount"),
 					containsString("partitionSelectorExpression"),
 					containsString("partitionKeyExtractorClass"),
 					containsString("partitionKeyExpression"),
@@ -283,7 +280,7 @@ public class RedisMessageBusTests extends PartitionCapableBusTests {
 		properties.put("partitionKeyExtractorClass", "foo");
 		properties.put("partitionSelectorExpression", "0");
 		properties.put("partitionSelectorClass", "foo");
-		properties.put("partitionCount", "1");
+		properties.put(BusProperties.NEXT_MODULE_COUNT, "1");
 		properties.put("partitionIndex", "0");
 		try {
 			bus.bindReplier("dummy", new DirectChannel(), new DirectChannel(), properties);
@@ -292,7 +289,6 @@ public class RedisMessageBusTests extends PartitionCapableBusTests {
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
 					containsString("RedisMessageBus does not support consumer properties: "),
-					containsString("partitionCount"),
 					containsString("partitionSelectorExpression"),
 					containsString("partitionKeyExtractorClass"),
 					containsString("partitionKeyExpression"),
@@ -383,7 +379,7 @@ public class RedisMessageBusTests extends PartitionCapableBusTests {
 				if (bytes == null) {
 					return null;
 				}
-				bytes = embeddedHeadersMessageConverter.extractHeaders(new GenericMessage<byte[]>(bytes)).getPayload();
+				bytes = (byte[]) embeddedHeadersMessageConverter.extractHeaders(new GenericMessage<byte[]>(bytes), false).getPayload();
 				return new String(bytes, "UTF-8");
 			}
 

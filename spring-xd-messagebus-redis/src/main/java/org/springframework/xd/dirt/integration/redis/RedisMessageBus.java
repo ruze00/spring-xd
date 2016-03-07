@@ -18,9 +18,7 @@ package org.springframework.xd.dirt.integration.redis;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
@@ -29,6 +27,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.expression.Expression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.integration.channel.DirectChannel;
+import org.springframework.integration.codec.Codec;
 import org.springframework.integration.endpoint.EventDrivenConsumer;
 import org.springframework.integration.endpoint.MessageProducerSupport;
 import org.springframework.integration.handler.AbstractMessageHandler;
@@ -41,12 +40,12 @@ import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
 import org.springframework.messaging.SubscribableChannel;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.retry.RecoveryCallback;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.RetryContext;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.util.Assert;
-import org.springframework.util.MimeTypeUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.xd.dirt.integration.bus.AbstractBusPropertiesAccessor;
 import org.springframework.xd.dirt.integration.bus.Binding;
@@ -54,12 +53,11 @@ import org.springframework.xd.dirt.integration.bus.BusProperties;
 import org.springframework.xd.dirt.integration.bus.EmbeddedHeadersMessageConverter;
 import org.springframework.xd.dirt.integration.bus.MessageBus;
 import org.springframework.xd.dirt.integration.bus.MessageBusSupport;
+import org.springframework.xd.dirt.integration.bus.MessageValues;
 import org.springframework.xd.dirt.integration.bus.XdHeaders;
-import org.springframework.xd.dirt.integration.bus.serializer.MultiTypeCodec;
 
 /**
  * A {@link MessageBus} implementation backed by Redis.
- *
  * @author Mark Fisher
  * @author Gary Russell
  * @author David Turanski
@@ -138,15 +136,16 @@ public class RedisMessageBus extends MessageBusSupport implements DisposableBean
 
 	private final RedisConnectionFactory connectionFactory;
 
-	private final EmbeddedHeadersMessageConverter embeddedHeadersMessageConverter = new EmbeddedHeadersMessageConverter();
+	private final EmbeddedHeadersMessageConverter embeddedHeadersMessageConverter = new
+			EmbeddedHeadersMessageConverter();
 
 	private final RedisQueueOutboundChannelAdapter errorAdapter;
 
-	public RedisMessageBus(RedisConnectionFactory connectionFactory, MultiTypeCodec<Object> codec) {
+	public RedisMessageBus(RedisConnectionFactory connectionFactory, Codec codec) {
 		this(connectionFactory, codec, new String[0]);
 	}
 
-	public RedisMessageBus(RedisConnectionFactory connectionFactory, MultiTypeCodec<Object> codec,
+	public RedisMessageBus(RedisConnectionFactory connectionFactory, Codec codec,
 			String... headersToMap) {
 		Assert.notNull(connectionFactory, "connectionFactory must not be null");
 		Assert.notNull(codec, "codec must not be null");
@@ -243,8 +242,8 @@ public class RedisMessageBus extends MessageBusSupport implements DisposableBean
 	}
 
 	/**
-	 * If retry is enabled, wrap the bridge channel in another that will invoke send() within
-	 * the scope of a retry template.
+	 * If retry is enabled, wrap the bridge channel in another that will invoke send() within the scope of a retry
+	 * template.
 	 * @param name The name.
 	 * @param bridgeToModuleChannel The channel.
 	 * @param properties The properties.
@@ -414,35 +413,25 @@ public class RedisMessageBus extends MessageBusSupport implements DisposableBean
 		private SendingHandler(MessageHandler delegate, String replyTo, RedisPropertiesAccessor properties) {
 			this.delegate = delegate;
 			this.replyTo = replyTo;
-			this.partitioningMetadata = new PartitioningMetadata(properties);
+			this.partitioningMetadata = new PartitioningMetadata(properties, properties.getNextModuleCount());
 			this.setBeanFactory(RedisMessageBus.this.getBeanFactory());
 		}
 
 		@Override
 		protected void handleMessageInternal(Message<?> message) throws Exception {
-			@SuppressWarnings("unchecked")
-			Message<byte[]> transformed = (Message<byte[]>) serializePayloadIfNecessary(message,
-					MimeTypeUtils.APPLICATION_OCTET_STREAM);
-			Map<String, Object> additionalHeaders = null;
+			MessageValues transformed = serializePayloadIfNecessary(message);
+
 			if (replyTo != null) {
-				additionalHeaders = new HashMap<String, Object>();
-				additionalHeaders.put(XdHeaders.REPLY_TO, this.replyTo);
+				transformed.put(XdHeaders.REPLY_TO, this.replyTo);
 			}
 			if (this.partitioningMetadata.isPartitionedModule()) {
-				if (additionalHeaders == null) {
-					additionalHeaders = new HashMap<String, Object>();
-				}
-				additionalHeaders.put(PARTITION_HEADER, determinePartition(message, this.partitioningMetadata));
+
+				transformed.put(PARTITION_HEADER, determinePartition(message, this.partitioningMetadata));
 			}
-			if (additionalHeaders != null) {
-				transformed = getMessageBuilderFactory().fromMessage(transformed)
-						.copyHeaders(additionalHeaders)
-						.build();
-			}
-			Message<?> messageToSend = embeddedHeadersMessageConverter.embedHeaders(transformed,
+
+			byte[] messageToSend = embeddedHeadersMessageConverter.embedHeaders(transformed,
 					RedisMessageBus.this.headersToMap);
-			Assert.isInstanceOf(byte[].class, messageToSend.getPayload());
-			delegate.handleMessage(messageToSend);
+			delegate.handleMessage(MessageBuilder.withPayload(messageToSend).copyHeaders(transformed).build());
 		}
 
 	}
@@ -457,14 +446,15 @@ public class RedisMessageBus extends MessageBusSupport implements DisposableBean
 		@SuppressWarnings("unchecked")
 		@Override
 		protected Object handleRequestMessage(Message<?> requestMessage) {
-			Message<?> theRequestMessage = requestMessage;
+			MessageValues theRequestMessage;
 			try {
-				theRequestMessage = embeddedHeadersMessageConverter.extractHeaders((Message<byte[]>) requestMessage);
+				theRequestMessage = embeddedHeadersMessageConverter.extractHeaders((Message<byte[]>) requestMessage, true);
 			}
 			catch (Exception e) {
 				logger.error(EmbeddedHeadersMessageConverter.decodeExceptionMessage(requestMessage), e);
+				theRequestMessage = new MessageValues(requestMessage);
 			}
-			return deserializePayloadIfNecessary(theRequestMessage);
+			return deserializePayloadIfNecessary(theRequestMessage).toMessage(getMessageBuilderFactory());
 		}
 
 		@Override
@@ -484,11 +474,11 @@ public class RedisMessageBus extends MessageBusSupport implements DisposableBean
 
 	/**
 	 * Provides concurrency by creating a list of message-driven endpoints.
-	 *
 	 */
 	private class CompositeRedisQueueMessageDrivenEndpoint extends MessageProducerSupport {
 
-		private final List<RedisQueueMessageDrivenEndpoint> consumers = new ArrayList<RedisQueueMessageDrivenEndpoint>();
+		private final List<RedisQueueMessageDrivenEndpoint> consumers = new
+				ArrayList<RedisQueueMessageDrivenEndpoint>();
 
 		public CompositeRedisQueueMessageDrivenEndpoint(String queueName, int concurrency) {
 			for (int i = 0; i < concurrency; i++) {

@@ -21,7 +21,6 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.springframework.util.Assert;
 import org.springframework.xd.dirt.core.Stream;
 import org.springframework.xd.dirt.integration.bus.BusProperties;
 import org.springframework.xd.module.ModuleDeploymentProperties;
@@ -72,24 +71,31 @@ public class StreamRuntimePropertiesProvider extends RuntimeModuleDeploymentProp
 		int moduleSequence = properties.getSequence();
 		int moduleIndex = moduleDescriptor.getIndex();
 
-		// Not first
+		// not first or input channel is named
+		if (moduleIndex > 0 || isNamedChannelInput(moduleDescriptor)) {
+			properties.put("consumer." + BusProperties.SEQUENCE, String.valueOf(moduleSequence));
+			properties.put("consumer." + BusProperties.COUNT, String.valueOf(properties.getCount()));
+
+		}
 		if (moduleIndex > 0) {
 			ModuleDescriptor previous = streamModules.get(moduleIndex - 1);
 			ModuleDeploymentProperties previousProperties = deploymentPropertiesProvider.propertiesForDescriptor(previous);
-			properties.put("consumer." + BusProperties.SEQUENCE, String.valueOf(moduleSequence));
-			properties.put("consumer." + BusProperties.COUNT, String.valueOf(properties.getCount()));
 			if (hasPartitionKeyProperty(previousProperties)) {
 				properties.put("consumer." + BusProperties.PARTITION_INDEX, String.valueOf(moduleSequence - 1));
+			}
+			String minPartitionCount = previousProperties.get("producer." + BusProperties.MIN_PARTITION_COUNT);
+			if (minPartitionCount != null) {
+				properties.put("consumer." + BusProperties.MIN_PARTITION_COUNT, minPartitionCount);
 			}
 		}
 		// Not last
 		if (moduleIndex + 1 < streamModules.size()) {
 			ModuleDeploymentProperties nextProperties = deploymentPropertiesProvider.propertiesForDescriptor(streamModules.get(moduleIndex + 1));
-			String count = nextProperties.get("count");
+			String count = nextProperties.get(ModuleDeploymentProperties.COUNT_KEY);
 			if (count != null) {
 				properties.put("producer." + BusProperties.NEXT_MODULE_COUNT, count);
 			}
-			String concurrency = nextProperties.get(BusProperties.CONCURRENCY);
+			String concurrency = nextProperties.get("consumer."+BusProperties.CONCURRENCY);
 			if (concurrency != null) {
 				properties.put("producer." + BusProperties.NEXT_MODULE_CONCURRENCY, concurrency);
 			}
@@ -97,24 +103,17 @@ public class StreamRuntimePropertiesProvider extends RuntimeModuleDeploymentProp
 
 		// Partitioning
 		if (hasPartitionKeyProperty(properties)) {
-			try {
-				ModuleDeploymentProperties nextProperties =
-						deploymentPropertiesProvider.propertiesForDescriptor(streamModules.get(moduleIndex + 1));
-
-				String count = nextProperties.get("count");
-				validateCountProperty(count, moduleDescriptor);
-				properties.put("producer." + BusProperties.PARTITION_COUNT, count);
-			}
-			catch (IndexOutOfBoundsException e) {
+			if (moduleIndex == streamModules.size() && !isNamedChannelOutput(moduleDescriptor)) {
 				logger.warn("Module '{}' is a sink module which contains a property " +
-						"of '{}' used for data partitioning; this feature is only " +
-						"supported for modules that produce data", moduleDescriptor,
+								"of '{}' used for data partitioning; this feature is only " +
+								"supported for modules that produce data", moduleDescriptor,
 						"producer.partitionKeyExpression");
-
 			}
 		}
 		else if (moduleIndex + 1 < streamModules.size()) {
-			ModuleDeploymentProperties nextProperties = deploymentPropertiesProvider.propertiesForDescriptor(streamModules.get(moduleIndex + 1));
+			// check for direct binding if the module is neither last nor partitioned
+			ModuleDeploymentProperties nextProperties =
+					deploymentPropertiesProvider.propertiesForDescriptor(streamModules.get(moduleIndex + 1));
 			/*
 			 *  A direct binding is allowed if all of the following are true:
 			 *  1. the user did not explicitly disallow direct binding
@@ -143,6 +142,21 @@ public class StreamRuntimePropertiesProvider extends RuntimeModuleDeploymentProp
 		return properties;
 	}
 
+	private boolean isNamedChannelInput(ModuleDescriptor moduleDescriptor) {
+		String sourceChannelName = moduleDescriptor.getSourceChannelName();
+		return sourceChannelName != null
+				&& (sourceChannelName.startsWith("tap:")
+					|| sourceChannelName.startsWith("topic:")
+					|| sourceChannelName.startsWith("queue:"));
+	}
+
+	private boolean isNamedChannelOutput(ModuleDescriptor moduleDescriptor) {
+		String sinkChannelName = moduleDescriptor.getSinkChannelName();
+		return sinkChannelName != null
+				&& (sinkChannelName.startsWith("topic:")
+				|| sinkChannelName.startsWith("queue:"));
+	}
+
 	/**
 	 * Return {@code true} if the provided properties include a property
 	 * used to extract a partition key.
@@ -151,34 +165,7 @@ public class StreamRuntimePropertiesProvider extends RuntimeModuleDeploymentProp
 	 * @return true if the properties contain a partition key property
 	 */
 	private boolean hasPartitionKeyProperty(ModuleDeploymentProperties properties) {
-		return (properties.containsKey("producer.partitionKeyExpression") || properties.containsKey("producer.partitionKeyExtractorClass"));
+		return (properties.containsKey("producer.partitionKeyExpression")
+				|| properties.containsKey("producer.partitionKeyExtractorClass"));
 	}
-
-	/**
-	 * Validate the value of {@code count} for the purposes of partitioning.
-	 * The value of the string must consist of an integer > 1.
-	 *
-	 * @param count       value to validate
-	 * @param descriptor  module descriptor this {@code count} property
-	 *                    is associated with
-	 *
-	 * @throws IllegalArgumentException if the value of the string
-	 *         does not consist of an integer > 1
-	 */
-	private void validateCountProperty(String count, ModuleDescriptor descriptor) {
-		Assert.hasText(count, String.format("'count' property is required " +
-				"in properties for module '%s' in order to support partitioning", descriptor));
-
-		try {
-			Assert.isTrue(Integer.parseInt(count) > 1,
-					String.format("'count' property for module '%s' must contain an " +
-							"integer > 1, current value is '%s'", descriptor, count));
-		}
-		catch (NumberFormatException e) {
-			throw new IllegalArgumentException(String.format("'count' property for " +
-					"module %s does not contain a valid integer, current value is '%s'",
-					descriptor, count));
-		}
-	}
-
 }

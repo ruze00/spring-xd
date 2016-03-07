@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 the original author or authors.
+ * Copyright 2013-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,8 @@ import org.springframework.xd.shell.command.fixtures.HttpSource;
 import org.springframework.xd.test.fixtures.Disposable;
 import org.springframework.xd.test.fixtures.FileSink;
 import org.springframework.xd.test.fixtures.FileSource;
+import org.springframework.xd.test.fixtures.FtpSink;
+import org.springframework.xd.test.fixtures.FtpSource;
 import org.springframework.xd.test.fixtures.JdbcSink;
 import org.springframework.xd.test.fixtures.JdbcSource;
 import org.springframework.xd.test.fixtures.MailSink;
@@ -47,10 +49,11 @@ import org.springframework.xd.test.fixtures.TcpSource;
  * @author Andy Clement
  * @author Mark Pollack
  * @author Eric Bottard
+ * @author Franck Marchand
  */
 public abstract class AbstractStreamIntegrationTest extends AbstractShellIntegrationTest {
 
-	private StreamCommandTemplate streamOps;
+	private StreamCommandsTemplate streamOps;
 
 	private List<Disposable> disposables = new ArrayList<Disposable>();
 
@@ -59,7 +62,7 @@ public abstract class AbstractStreamIntegrationTest extends AbstractShellIntegra
 	private ModuleTemplate moduleTemplate;
 
 	public AbstractStreamIntegrationTest() {
-		streamOps = new StreamCommandTemplate(getShell(), integrationTestSupport);
+		streamOps = new StreamCommandsTemplate(getShell(), integrationTestSupport);
 		metrics = new MetricsTemplate(getShell());
 		moduleTemplate = new ModuleTemplate(getShell());
 		disposables.add(metrics);
@@ -70,7 +73,7 @@ public abstract class AbstractStreamIntegrationTest extends AbstractShellIntegra
 		return metrics;
 	}
 
-	protected StreamCommandTemplate stream() {
+	protected StreamCommandsTemplate stream() {
 		return streamOps;
 	}
 
@@ -104,10 +107,28 @@ public abstract class AbstractStreamIntegrationTest extends AbstractShellIntegra
 	}
 
 	protected JdbcSink newJdbcSink() {
-		return new JdbcSink(createDataSource());
+		JdbcSink jdbcSink = new JdbcSink(createDataSource());
+		disposables.add(jdbcSink);
+		return jdbcSink;
 	}
 
-	protected JdbcSource newJdbcSource() { return new JdbcSource(createDataSource());}
+	protected JdbcSource newJdbcSource() {
+		JdbcSource jdbcSource = new JdbcSource(createDataSource());
+		disposables.add(jdbcSource);
+		return jdbcSource;
+	}
+
+	protected FtpSource newFtpSource() {
+		FtpSource ftpSource = new FtpSource();
+		disposables.add(ftpSource);
+		return ftpSource;
+	}
+
+	protected FtpSink newFtpSink() {
+		FtpSink ftpSink = new FtpSink();
+		disposables.add(ftpSink);
+		return ftpSink;
+	}
 
 	private DataSource createDataSource() {
 

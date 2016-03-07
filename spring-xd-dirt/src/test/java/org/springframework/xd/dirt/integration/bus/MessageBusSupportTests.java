@@ -22,13 +22,12 @@ import static org.junit.Assert.assertSame;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Properties;
 
 import org.junit.Before;
 import org.junit.Test;
 
+import org.springframework.integration.codec.kryo.PojoCodec;
 import org.springframework.integration.support.MessageBuilder;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
@@ -38,13 +37,10 @@ import org.springframework.messaging.support.GenericMessage;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
 import org.springframework.xd.dirt.integration.bus.MessageBusSupport.JavaClassMimeTypeConversion;
-import org.springframework.xd.dirt.integration.bus.serializer.AbstractCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.CompositeCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.kryo.PojoCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.kryo.TupleCodec;
 import org.springframework.xd.tuple.DefaultTuple;
 import org.springframework.xd.tuple.Tuple;
 import org.springframework.xd.tuple.TupleBuilder;
+import org.springframework.xd.tuple.serializer.kryo.TupleKryoRegistrar;
 
 /**
  * @author Gary Russell
@@ -56,27 +52,27 @@ public class MessageBusSupportTests {
 
 	private final TestMessageBus messageBus = new TestMessageBus();
 
-	@SuppressWarnings({ "unchecked", "rawtypes" })
+	@SuppressWarnings({"unchecked", "rawtypes"})
 	@Before
 	public void setUp() {
-		Map<Class<?>, AbstractCodec<?>> codecs = new HashMap<Class<?>, AbstractCodec<?>>();
-		codecs.put(Tuple.class, new TupleCodec());
-		messageBus.setCodec(new CompositeCodec(codecs, new PojoCodec()));
+		messageBus.setCodec(new PojoCodec(new TupleKryoRegistrar()));
 	}
 
 	@Test
 	public void testBytesPassThru() {
 		byte[] payload = "foo".getBytes();
 		Message<byte[]> message = MessageBuilder.withPayload(payload).build();
-		Message<?> converted = messageBus.serializePayloadIfNecessary(message,
-				MimeTypeUtils.APPLICATION_OCTET_STREAM);
+		MessageValues converted = messageBus.serializePayloadIfNecessary(message
+		);
 		assertSame(payload, converted.getPayload());
+		Message<?> convertedMessage = converted.toMessage();
+		assertSame(payload, convertedMessage.getPayload());
 		assertEquals(MimeTypeUtils.APPLICATION_OCTET_STREAM,
-				contentTypeResolver.resolve(converted.getHeaders()));
-		Message<?> reconstructed = messageBus.deserializePayloadIfNecessary(converted);
+				contentTypeResolver.resolve(convertedMessage.getHeaders()));
+		MessageValues reconstructed = messageBus.deserializePayloadIfNecessary(convertedMessage);
 		payload = (byte[]) reconstructed.getPayload();
 		assertSame(converted.getPayload(), payload);
-		assertNull(reconstructed.getHeaders().get(XdHeaders.XD_ORIGINAL_CONTENT_TYPE));
+		assertNull(reconstructed.get(XdHeaders.XD_ORIGINAL_CONTENT_TYPE));
 	}
 
 	@Test
@@ -85,29 +81,31 @@ public class MessageBusSupportTests {
 		Message<byte[]> message = MessageBuilder.withPayload(payload)
 				.setHeader(MessageHeaders.CONTENT_TYPE, MimeTypeUtils.APPLICATION_OCTET_STREAM_VALUE)
 				.build();
-		Message<?> converted = messageBus.serializePayloadIfNecessary(message,
-				MimeTypeUtils.APPLICATION_OCTET_STREAM);
+		MessageValues messageValues = messageBus.serializePayloadIfNecessary(message
+		);
+		Message<?> converted = messageValues.toMessage();
 		assertSame(payload, converted.getPayload());
 		assertEquals(MimeTypeUtils.APPLICATION_OCTET_STREAM,
 				contentTypeResolver.resolve(converted.getHeaders()));
-		Message<?> reconstructed = messageBus.deserializePayloadIfNecessary(converted);
+		MessageValues reconstructed = messageBus.deserializePayloadIfNecessary(converted);
 		payload = (byte[]) reconstructed.getPayload();
 		assertSame(converted.getPayload(), payload);
 		assertEquals(MimeTypeUtils.APPLICATION_OCTET_STREAM_VALUE,
-				reconstructed.getHeaders().get(MessageHeaders.CONTENT_TYPE));
-		assertNull(reconstructed.getHeaders().get(XdHeaders.XD_ORIGINAL_CONTENT_TYPE));
+				reconstructed.get(MessageHeaders.CONTENT_TYPE));
+		assertNull(reconstructed.get(XdHeaders.XD_ORIGINAL_CONTENT_TYPE));
 	}
 
 	@Test
 	public void testString() throws IOException {
-		Message<?> converted = messageBus.serializePayloadIfNecessary(
-				new GenericMessage<String>("foo"), MimeTypeUtils.APPLICATION_OCTET_STREAM);
+		MessageValues convertedValues = messageBus.serializePayloadIfNecessary(
+				new GenericMessage<String>("foo"));
 
+		Message<?> converted = convertedValues.toMessage();
 		assertEquals(MimeTypeUtils.TEXT_PLAIN,
 				contentTypeResolver.resolve(converted.getHeaders()));
-		Message<?> reconstructed = messageBus.deserializePayloadIfNecessary(converted);
+		MessageValues reconstructed = messageBus.deserializePayloadIfNecessary(converted);
 		assertEquals("foo", reconstructed.getPayload());
-		assertNull(reconstructed.getHeaders().get(MessageHeaders.CONTENT_TYPE));
+		assertNull(reconstructed.get(MessageHeaders.CONTENT_TYPE));
 	}
 
 	@Test
@@ -115,76 +113,82 @@ public class MessageBusSupportTests {
 		Message<String> inbound = MessageBuilder.withPayload("{\"foo\":\"foo\"}")
 				.copyHeaders(Collections.singletonMap(MessageHeaders.CONTENT_TYPE, MimeTypeUtils.APPLICATION_JSON))
 				.build();
-		Message<?> converted = messageBus.serializePayloadIfNecessary(
-				inbound, MimeTypeUtils.APPLICATION_OCTET_STREAM);
+		MessageValues convertedValues = messageBus.serializePayloadIfNecessary(
+				inbound);
+
+		Message<?> converted = convertedValues.toMessage();
 
 		assertEquals(MimeTypeUtils.TEXT_PLAIN,
 				contentTypeResolver.resolve(converted.getHeaders()));
 		assertEquals(MimeTypeUtils.APPLICATION_JSON,
 				converted.getHeaders().get(XdHeaders.XD_ORIGINAL_CONTENT_TYPE));
-		Message<?> reconstructed = messageBus.deserializePayloadIfNecessary(converted);
+		MessageValues reconstructed = messageBus.deserializePayloadIfNecessary(converted);
 		assertEquals("{\"foo\":\"foo\"}", reconstructed.getPayload());
-		assertEquals(MimeTypeUtils.APPLICATION_JSON, reconstructed.getHeaders().get(MessageHeaders.CONTENT_TYPE));
+		assertEquals(MimeTypeUtils.APPLICATION_JSON, reconstructed.get(MessageHeaders.CONTENT_TYPE));
 	}
 
 	@Test
 	public void testPojoSerialization() {
-		Message<?> converted = messageBus.serializePayloadIfNecessary(
-				new GenericMessage<Foo>(new Foo("bar")),
-				MimeTypeUtils.APPLICATION_OCTET_STREAM);
+		MessageValues convertedValues = messageBus.serializePayloadIfNecessary(
+				new GenericMessage<Foo>(new Foo("bar"))
+		);
+		Message<?> converted = convertedValues.toMessage();
 		MimeType mimeType = contentTypeResolver.resolve(converted.getHeaders());
 		assertEquals("application", mimeType.getType());
 		assertEquals("x-java-object", mimeType.getSubtype());
 		assertEquals(Foo.class.getName(), mimeType.getParameter("type"));
 
-		Message<?> reconstructed = messageBus.deserializePayloadIfNecessary(converted);
+		MessageValues reconstructed = messageBus.deserializePayloadIfNecessary(converted);
 		assertEquals("bar", ((Foo) reconstructed.getPayload()).getBar());
-		assertNull(reconstructed.getHeaders().get(MessageHeaders.CONTENT_TYPE));
+		assertNull(reconstructed.get(MessageHeaders.CONTENT_TYPE));
 	}
 
 	@Test
 	public void testPojoWithXJavaObjectMimeTypeNoType() {
-		Message<?> converted = messageBus.serializePayloadIfNecessary(
-				new GenericMessage<Foo>(new Foo("bar")),
-				MimeTypeUtils.APPLICATION_OCTET_STREAM);
+		MessageValues convertedValues = messageBus.serializePayloadIfNecessary(
+				new GenericMessage<Foo>(new Foo("bar"))
+		);
+		Message<?> converted = convertedValues.toMessage();
 		MimeType mimeType = contentTypeResolver.resolve(converted.getHeaders());
 		assertEquals("application", mimeType.getType());
 		assertEquals("x-java-object", mimeType.getSubtype());
 		assertEquals(Foo.class.getName(), mimeType.getParameter("type"));
 
-		Message<?> reconstructed = messageBus.deserializePayloadIfNecessary(converted);
+		MessageValues reconstructed = messageBus.deserializePayloadIfNecessary(converted);
 		assertEquals("bar", ((Foo) reconstructed.getPayload()).getBar());
-		assertNull(reconstructed.getHeaders().get(MessageHeaders.CONTENT_TYPE));
+		assertNull(reconstructed.get(MessageHeaders.CONTENT_TYPE));
 	}
 
 	@Test
 	public void testPojoWithXJavaObjectMimeTypeExplicitType() {
-		Message<?> converted = messageBus.serializePayloadIfNecessary(
-				new GenericMessage<Foo>(new Foo("bar")),
-				MimeTypeUtils.APPLICATION_OCTET_STREAM);
+		MessageValues convertedValues = messageBus.serializePayloadIfNecessary(
+				new GenericMessage<Foo>(new Foo("bar"))
+		);
+		Message<?> converted = convertedValues.toMessage();
 		MimeType mimeType = contentTypeResolver.resolve(converted.getHeaders());
 		assertEquals("application", mimeType.getType());
 		assertEquals("x-java-object", mimeType.getSubtype());
 		assertEquals(Foo.class.getName(), mimeType.getParameter("type"));
 
-		Message<?> reconstructed = messageBus.deserializePayloadIfNecessary(converted);
+		MessageValues reconstructed = messageBus.deserializePayloadIfNecessary(converted);
 		assertEquals("bar", ((Foo) reconstructed.getPayload()).getBar());
-		assertNull(reconstructed.getHeaders().get(MessageHeaders.CONTENT_TYPE));
+		assertNull(reconstructed.get(MessageHeaders.CONTENT_TYPE));
 	}
 
 	@Test
 	public void testTupleSerialization() {
 		Tuple payload = TupleBuilder.tuple().of("foo", "bar");
-		Message<?> converted = messageBus.serializePayloadIfNecessary(new GenericMessage<Tuple>(payload),
-				MimeTypeUtils.APPLICATION_OCTET_STREAM);
+		MessageValues convertedValues = messageBus.serializePayloadIfNecessary(new GenericMessage<Tuple>(payload)
+		);
+		Message<?> converted = convertedValues.toMessage();
 		MimeType mimeType = contentTypeResolver.resolve(converted.getHeaders());
 		assertEquals("application", mimeType.getType());
 		assertEquals("x-java-object", mimeType.getSubtype());
 		assertEquals(DefaultTuple.class.getName(), mimeType.getParameter("type"));
 
-		Message<?> reconstructed = messageBus.deserializePayloadIfNecessary(converted);
+		MessageValues reconstructed = messageBus.deserializePayloadIfNecessary(converted);
 		assertEquals("bar", ((Tuple) reconstructed.getPayload()).getString("foo"));
-		assertNull(reconstructed.getHeaders().get(MessageHeaders.CONTENT_TYPE));
+		assertNull(reconstructed.get(MessageHeaders.CONTENT_TYPE));
 	}
 
 	@Test

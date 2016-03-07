@@ -1,7 +1,5 @@
 [[REST-API]]
-ifndef::env-github[]
 == REST API
-endif::[]
 
 === Introduction
 The Spring XD Administrator process (Admin) provides a REST API to access various Spring XD resources such as streams, jobs, metrics, modules, Spring batch resources, and container runtime information. The REST API is used internally by the XD Shell and Admin UI and can support any custom client application that requires interaction with XD. 
@@ -343,6 +341,10 @@ For both the GET endpoints **only** 'application/json' accept header is supporte
 |GET
 |list all the known counters
 
+|/metrics/counters?detailed=true
+|GET
+|list metric values for all known counters
+
 |/metrics/counters/\{name\}
 |GET
 |get the current metric value
@@ -363,6 +365,10 @@ For both the GET endpoints **only** 'application/json' accept header is supporte
 |/metrics/field-value-counters/
 |GET
 |list all the known field value counters
+
+|/metrics/field-value-counters?detailed=true
+|GET
+|list metric values for all known field value counters
 
 |/metrics/field-value-counters/\{name\}
 |GET
@@ -385,6 +391,10 @@ For both the GET endpoints **only** 'application/json' accept header is supporte
 |GET
 |list all the known aggregate counters
 
+|/metrics/aggregate-counters?detailed=true
+|GET
+|list current metric values for all known aggregate counters
+
 |/metrics/aggregate-counters/\{name\}
 |GET
 |get the current metric values
@@ -406,6 +416,10 @@ For both the GET endpoints **only** 'application/json' accept header is supporte
 |GET
 |list all the known gauges
 
+|/metrics/gauges?detailed=true
+|GET
+|list current metric values for all known gauges
+
 |/metrics/gauges/\{name\}
 |GET
 |get the current metric values
@@ -426,6 +440,10 @@ For both the GET endpoints **only** 'application/json' accept header is supporte
 |/metrics/rich-gauges/
 |GET
 |list all the known rich gauges
+
+|/metrics/rich-gauges?detailed=true
+|GET
+|list metric values for all known rich gauges
 
 |/metrics/rich-gauges/\{name\}
 |GET

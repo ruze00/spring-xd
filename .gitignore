@@ -15,9 +15,9 @@ target/
 .classpath
 .project
 .springBeans
+.cache-main
 vf.gf.*
 bin
-dist
 dump.rdb
 .DS_Store
 tomcat.*

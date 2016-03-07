@@ -41,7 +41,6 @@ import org.springframework.xd.dirt.zookeeper.ZooKeeperConnection;
 
 /**
  * Beans defined and imported here are shared by the XD Admin Server and Container Server.
- *
  * @author David Turanski
  * @author Mark Fisher
  * @author Ilayaperumal Gopinathan
@@ -50,13 +49,11 @@ import org.springframework.xd.dirt.zookeeper.ZooKeeperConnection;
  */
 @Configuration
 @EnableIntegration
-@Import(PropertyPlaceholderAutoConfiguration.class)
+@Import({PropertyPlaceholderAutoConfiguration.class, MessageBusExtensionsConfiguration.class})
 @ImportResource({
-	ConfigLocations.XD_CONFIG_ROOT + "bus/${XD_TRANSPORT}-bus.xml",
-	ConfigLocations.XD_CONFIG_ROOT + "bus/codec.xml",
-	"classpath*:" + ConfigLocations.XD_CONFIG_ROOT + "bus/ext/*.xml",
-	ConfigLocations.XD_CONFIG_ROOT + "internal/repositories.xml",
-	ConfigLocations.XD_CONFIG_ROOT + "analytics/${XD_ANALYTICS}-analytics.xml"
+		ConfigLocations.XD_CONFIG_ROOT + "bus/${XD_TRANSPORT}-bus.xml",
+		ConfigLocations.XD_CONFIG_ROOT + "internal/repositories.xml",
+		ConfigLocations.XD_CONFIG_ROOT + "analytics/${XD_ANALYTICS}-analytics.xml"
 })
 public class SharedServerContextConfiguration {
 
@@ -125,13 +122,13 @@ public class SharedServerContextConfiguration {
 		@Value("${zk.client.sessionTimeout:" + ZooKeeperConnection.DEFAULT_SESSION_TIMEOUT + "}")
 		protected int zkSessionTimeout;
 
-		@Value("${zk.client.connectionTimeout:"+ ZooKeeperConnection.DEFAULT_CONNECTION_TIMEOUT +"}")
+		@Value("${zk.client.connectionTimeout:" + ZooKeeperConnection.DEFAULT_CONNECTION_TIMEOUT + "}")
 		protected int zkConnectionTimeout;
 
 		@Value("${zk.client.initialRetryWait:" + ZooKeeperConnection.DEFAULT_INITIAL_RETRY_WAIT + "}")
 		protected int zkInitialRetryWait;
 
-		@Value("${zk.client.retryMaxAttempts:"+ ZooKeeperConnection.DEFAULT_MAX_RETRY_ATTEMPTS +"}")
+		@Value("${zk.client.retryMaxAttempts:" + ZooKeeperConnection.DEFAULT_MAX_RETRY_ATTEMPTS + "}")
 		protected int zkRetryMaxAttempts;
 
 		// TODO: Consider a way to not require this property

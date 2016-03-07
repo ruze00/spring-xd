@@ -24,9 +24,33 @@ project('spring-xd-extension-http') {
         compile "org.springframework.integration:spring-integration-core"
         compile "io.netty:netty:${nettyVersion}"
         compile "org.springframework:spring-web"
+        compile "org.slf4j:slf4j-api"
         compile project(":spring-xd-module-spi")
         testCompile project(":spring-xd-test")
     }
+}
+
+project('spring-xd-extension-gpfdist') {
+	description = 'Spring XD gpfdist'
+	dependencies {
+		compile "io.projectreactor:reactor-core"
+		compile "io.projectreactor:reactor-net"
+		compile "com.codahale.metrics:metrics-core"
+		compile "org.springframework.integration:spring-integration-core"
+		compile "org.springframework:spring-jdbc"
+		compile "org.yaml:snakeyaml"
+		compile "commons-dbcp:commons-dbcp"
+		compile project(":spring-xd-module-spi")
+		testCompile "junit:junit"
+		testCompile "org.postgresql:postgresql:$postgresqlVersion"
+		testCompile "org.springframework:spring-test"
+		testCompile "org.mockito:mockito-core"
+		testCompile "org.hamcrest:hamcrest-library"
+		testRuntime "io.netty:netty-all"
+	}
+	test {
+		exclude '**/*IT*'
+	}
 }
 
 project('spring-xd-extension-gemfire') {
@@ -35,6 +59,15 @@ project('spring-xd-extension-gemfire') {
         compile "org.springframework.integration:spring-integration-gemfire"
         compile project(':spring-xd-module-spi')
         compile "javax.validation:validation-api"
+    }
+}
+
+project('spring-xd-extension-header-enricher'){
+    description = 'Spring XD Header Enricher Module'
+    dependencies {
+        testCompile project(':spring-xd-dirt')
+        testCompile project(':spring-xd-module-spi')
+        testCompile project(":spring-xd-test")
     }
 }
 
@@ -75,12 +108,15 @@ project('spring-xd-extension-batch') {
     dependencies {
         compile "org.springframework.integration:spring-integration-file"
         runtime "org.springframework.integration:spring-integration-ftp"
-        runtime "org.projectreactor:reactor-core"
+        runtime "io.projectreactor:reactor-core"
+        runtime "io.projectreactor:reactor-stream" // TODO: remove when INT-3766 is resolved
+        provided "org.springframework:spring-jdbc"
         provided "org.springframework.batch:spring-batch-core"
         provided "org.springframework.data:spring-data-hadoop-store:${springDataHadoopBase}"
         testCompile project(':spring-xd-test')
         testCompile project(':spring-xd-dirt')
         testCompile project(':spring-xd-messagebus-local')
+        testCompile "com.esotericsoftware:kryo-shaded"
     }
 }
 
@@ -97,10 +133,12 @@ project('spring-xd-extension-process') {
 	dependencies {
 		compile project(':spring-xd-extension-encoder-support')
 		compile "org.springframework.integration:spring-integration-ip"
+		compile "org.slf4j:slf4j-api"
 		testCompile project(':spring-xd-test')
-		testRuntime "org.slf4j:jcl-over-slf4j",
+		testRuntime (
+		//"org.slf4j:jcl-over-slf4j",
 				"org.slf4j:slf4j-log4j12",
-				"log4j:log4j"
+				"log4j:log4j")
 	}
 }
 
@@ -163,7 +201,7 @@ project('spring-xd-extension-jdbc') {
         compile "org.springframework:spring-tx"
         compile "org.springframework.batch:spring-batch-infrastructure"
         compile "org.springframework.integration:spring-integration-core"
-        runtime "org.springframework.integration:spring-integration-jdbc"
+        runtime ("org.springframework.integration:spring-integration-jdbc") { exclude group: 'com.google.guava' }
         runtime "com.fasterxml.jackson.core:jackson-databind"
         compile "org.hsqldb:hsqldb"
         runtime "mysql:mysql-connector-java"
@@ -177,17 +215,20 @@ project('spring-xd-extension-reactor') {
     description = 'Spring XD Reactor'
     dependencies {
         compile project(':spring-xd-module-spi'),
-                "org.projectreactor.spring:reactor-spring-messaging",
-                "org.springframework.integration:spring-integration-core",
+                "io.projectreactor:reactor-net",
+                "io.netty:netty-all",
                 "javax.validation:validation-api"
+
+        compile ("org.springframework.integration:spring-integration-core")
 
         testCompile project(":spring-xd-test"),
                 project(':spring-xd-module'),
                 "com.jayway.jsonpath:json-path"
         "com.esotericsoftware.kryo:kryo"
-        testRuntime "org.slf4j:jcl-over-slf4j",
+        testRuntime(
+		//"org.slf4j:jcl-over-slf4j",
                 "org.slf4j:slf4j-log4j12",
-                "log4j:log4j"
+                "log4j:log4j")
     }
 }
 
@@ -200,9 +241,9 @@ project('spring-xd-extension-throughput') {
 
         testCompile project(":spring-xd-test"),
                 project(':spring-xd-module')
-        testRuntime "org.slf4j:jcl-over-slf4j",
+        testRuntime(// "org.slf4j:jcl-over-slf4j",
                 "org.slf4j:slf4j-log4j12",
-                "log4j:log4j"
+                "log4j:log4j")
     }
 }
 
@@ -232,7 +273,7 @@ project('spring-xd-extension-sqoop') {
     dependencies {
         compile project(':spring-xd-module-spi')
         compile project(':spring-xd-extension-batch')
-        compile project(':spring-xd-extension-jdbc')
+        compile (project(':spring-xd-extension-jdbc')) { exclude group: 'com.google.guava' }
         compile "org.apache.sqoop:sqoop:${sqoopVersion}:hadoop200"
         provided "org.springframework.batch:spring-batch-core"
         provided "org.springframework.data:spring-data-hadoop-core:${springDataHadoopBase}"
@@ -245,8 +286,25 @@ project('spring-xd-extension-gpload') {
     dependencies {
         compile project(':spring-xd-module-spi')
         compile project(':spring-xd-extension-batch')
-        compile project(':spring-xd-extension-jdbc')
+        compile (project(':spring-xd-extension-jdbc'))  { exclude group: 'com.google.guava' }
         provided "org.springframework.batch:spring-batch-core"
         compile "org.yaml:snakeyaml"
+    }
+}
+
+project('spring-xd-extension-cassandra') {
+    description = 'Spring XD Cassandra'
+    dependencies {
+        compile project(':spring-xd-module-spi')
+        provided "org.springframework.integration:spring-integration-cassandra:$springIntegrationCassandraVersion"
+        provided "com.fasterxml.jackson.core:jackson-databind"
+        testCompile project(':spring-xd-dirt')
+        testCompile project(':spring-xd-test')
+        testCompile("org.cassandraunit:cassandra-unit-spring:$cassandraUnitVersion") {
+            exclude group: 'org.apache.cassandra', module: 'cassandra-all'
+            exclude group: 'com.datastax.cassandra', module: 'cassandra-driver-core'
+            exclude group: 'org.slf4j', module: 'slf4j-log4j12'
+        }
+        testCompile("org.apache.cassandra:cassandra-all:$cassandraVersion")
     }
 }

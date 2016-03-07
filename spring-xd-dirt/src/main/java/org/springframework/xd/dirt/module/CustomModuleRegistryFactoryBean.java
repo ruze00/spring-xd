@@ -25,6 +25,9 @@ import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.FactoryBean;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.Environment;
 
 /**
  * Will create a {@link SynchronizingModuleRegistry} for hosting custom modules if necessary, depending on the
@@ -32,8 +35,9 @@ import org.springframework.beans.factory.InitializingBean;
  *
  * @since 1.2
  * @author Eric Bottard
+ * @author David Turanski
  */
-public class CustomModuleRegistryFactoryBean implements FactoryBean<WritableModuleRegistry>, InitializingBean{
+public class CustomModuleRegistryFactoryBean implements FactoryBean<WritableModuleRegistry>, EnvironmentAware, InitializingBean{
 
 	private static final Logger logger = LoggerFactory.getLogger(CustomModuleRegistryFactoryBean.class);
 
@@ -42,6 +46,11 @@ public class CustomModuleRegistryFactoryBean implements FactoryBean<WritableModu
 	private WritableModuleRegistry registry;
 
 	private final String root;
+
+	private ConfigurableEnvironment environment;
+
+	private boolean requiresHashFiles;
+
 
 	public CustomModuleRegistryFactoryBean(String root) {
 		this.root = root;
@@ -63,10 +72,16 @@ public class CustomModuleRegistryFactoryBean implements FactoryBean<WritableModu
 	}
 
 	@Override
+	public void setEnvironment(Environment environment) {
+		this.environment = (ConfigurableEnvironment) environment;
+	}
+
+	@Override
 	public void afterPropertiesSet() throws Exception {
 		Matcher matcher = NO_SYNCHRONIZATION_PATTERN.matcher(root);
 		if (matcher.matches()) {
 			registry = new WritableResourceModuleRegistry(root);
+			((WritableResourceModuleRegistry)registry).setRequireHashFiles(requiresHashFiles);
 			((WritableResourceModuleRegistry)registry).afterPropertiesSet();
 			logger.info("Custom modules will be written directly to {}", root);
 		}
@@ -76,10 +91,15 @@ public class CustomModuleRegistryFactoryBean implements FactoryBean<WritableModu
 			local.afterPropertiesSet();
 
 			WritableResourceModuleRegistry remote = new WritableResourceModuleRegistry(root);
+			remote.setEnvironment(environment);
 			remote.afterPropertiesSet();
 
 			registry = new SynchronizingModuleRegistry(remote, local);
 			logger.info("Custom modules will be written at {} and kept in synch locally at {}", root, localRoot);
 		}
+	}
+
+	public void setRequiresHashFiles(boolean requiresHashFiles) {
+		this.requiresHashFiles = requiresHashFiles;
 	}
 }

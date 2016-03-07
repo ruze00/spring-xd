@@ -21,20 +21,23 @@ import static org.springframework.util.MimeTypeUtils.TEXT_PLAIN_VALUE;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
@@ -48,16 +51,15 @@ import org.springframework.context.support.AbstractApplicationContext;
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
 import org.springframework.integration.channel.DirectChannel;
+import org.springframework.integration.codec.Codec;
+import org.springframework.integration.context.IntegrationContextUtils;
 import org.springframework.integration.endpoint.EventDrivenConsumer;
-import org.springframework.integration.expression.IntegrationEvaluationContextAware;
-import org.springframework.integration.support.MessageBuilder;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.MessagingException;
 import org.springframework.messaging.SubscribableChannel;
-import org.springframework.messaging.converter.ContentTypeResolver;
 import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
@@ -67,8 +69,6 @@ import org.springframework.util.ClassUtils;
 import org.springframework.util.IdGenerator;
 import org.springframework.util.MimeType;
 import org.springframework.util.StringUtils;
-import org.springframework.xd.dirt.integration.bus.serializer.MultiTypeCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.SerializationException;
 
 /**
  * @author David Turanski
@@ -76,9 +76,11 @@ import org.springframework.xd.dirt.integration.bus.serializer.SerializationExcep
  * @author Ilayaperumal Gopinathan
  */
 public abstract class MessageBusSupport
-		implements MessageBus, ApplicationContextAware, InitializingBean, IntegrationEvaluationContextAware {
+		implements MessageBus, ApplicationContextAware, InitializingBean {
 
 	protected static final String P2P_NAMED_CHANNEL_TYPE_PREFIX = "queue:";
+
+	protected static final String TAP_TYPE_PREFIX = "tap:";
 
 	protected static final String PUBSUB_NAMED_CHANNEL_TYPE_PREFIX = "topic:";
 
@@ -86,13 +88,13 @@ public abstract class MessageBusSupport
 
 	protected static final String PARTITION_HEADER = "partition";
 
-	protected final Log logger = LogFactory.getLog(getClass());
+	protected final Logger logger = LoggerFactory.getLogger(getClass());
 
 	private volatile AbstractApplicationContext applicationContext;
 
-	private volatile MultiTypeCodec<Object> codec;
+	private volatile Codec codec;
 
-	private final ContentTypeResolver contentTypeResolver = new StringConvertingContentTypeResolver();
+	private final StringConvertingContentTypeResolver contentTypeResolver = new StringConvertingContentTypeResolver();
 
 	private final ThreadLocal<Boolean> revertingDirectBinding = new ThreadLocal<Boolean>();
 
@@ -112,7 +114,7 @@ public abstract class MessageBusSupport
 
 	private static final int DEFAULT_BATCH_BUFFER_LIMIT = 10000;
 
-	private static final int DEFAULT_BATCH_TIMEOUT = 5000;
+	private static final int DEFAULT_BATCH_TIMEOUT = 0;
 
 	/**
 	 * The set of properties every bus implementation must support (or at least tolerate).
@@ -124,8 +126,9 @@ public abstract class MessageBusSupport
 			.build();
 
 	protected static final Set<Object> PRODUCER_STANDARD_PROPERTIES = new HashSet<Object>(Arrays.asList(
-			BusProperties.NEXT_MODULE_COUNT
-	));
+			BusProperties.NEXT_MODULE_COUNT,
+			BusProperties.NEXT_MODULE_CONCURRENCY
+			));
 
 
 	protected static final Set<Object> CONSUMER_RETRY_PROPERTIES = new HashSet<Object>(Arrays.asList(new String[] {
@@ -137,7 +140,6 @@ public abstract class MessageBusSupport
 
 	protected static final Set<Object> PRODUCER_PARTITIONING_PROPERTIES = new HashSet<Object>(
 			Arrays.asList(new String[] {
-				BusProperties.PARTITION_COUNT,
 				BusProperties.PARTITION_KEY_EXPRESSION,
 				BusProperties.PARTITION_KEY_EXTRACTOR_CLASS,
 				BusProperties.PARTITION_SELECTOR_CLASS,
@@ -167,14 +169,15 @@ public abstract class MessageBusSupport
 	/**
 	 * Used in the canonical case, when the binding does not involve an alias name.
 	 */
-	protected final SharedChannelProvider<DirectChannel> directChannelProvider = new SharedChannelProvider<DirectChannel>(
-			DirectChannel.class) {
+	protected final SharedChannelProvider<DirectChannel> directChannelProvider = new
+			SharedChannelProvider<DirectChannel>(
+					DirectChannel.class) {
 
-		@Override
-		protected DirectChannel createSharedChannel(String name) {
-			return new DirectChannel();
-		}
-	};
+				@Override
+				protected DirectChannel createSharedChannel(String name) {
+					return new DirectChannel();
+				}
+			};
 
 	protected volatile long defaultBackOffInitialInterval = DEFAULT_BACKOFF_INITIAL_INTERVAL;
 
@@ -200,9 +203,13 @@ public abstract class MessageBusSupport
 
 	protected volatile boolean defaultCompress = false;
 
+	protected volatile boolean defaultDurableSubscription = false;
+
+	// Payload type cache
+	private volatile Map<String, Class<?>> payloadTypeCache = new ConcurrentHashMap<>();
+
 	/**
-	 * For bus implementations that support a prefix, apply the prefix
-	 * to the name.
+	 * For bus implementations that support a prefix, apply the prefix to the name.
 	 * @param prefix the prefix.
 	 * @param name the name.
 	 */
@@ -211,9 +218,7 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * For bus implementations that include a pub/sub component in identifiers,
-	 * construct the name.
-	 * @param prefix the prefix.
+	 * For bus implementations that include a pub/sub component in identifiers, construct the name.
 	 * @param name the name.
 	 */
 	public static String applyPubSub(String name) {
@@ -230,8 +235,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * For bus implementations that support dead lettering, construct the name of the
-	 * dead letter entity for the underlying pipe name.
+	 * For bus implementations that support dead lettering, construct the name of the dead letter entity for the
+	 * underlying pipe name.
 	 * @param name the name.
 	 */
 	public static String constructDLQName(String name) {
@@ -252,7 +257,7 @@ public abstract class MessageBusSupport
 		return this.applicationContext.getBeanFactory();
 	}
 
-	public void setCodec(MultiTypeCodec<Object> codec) {
+	public void setCodec(Codec codec) {
 		this.codec = codec;
 	}
 
@@ -260,14 +265,12 @@ public abstract class MessageBusSupport
 		return idGenerator;
 	}
 
-	@Override
 	public void setIntegrationEvaluationContext(EvaluationContext evaluationContext) {
 		this.evaluationContext = evaluationContext;
 	}
 
 	/**
-	 * Set the partition strategy to be used by this bus if no partitionExpression
-	 * is provided for a module.
+	 * Set the partition strategy to be used by this bus if no partitionExpression is provided for a module.
 	 * @param partitionSelector The selector.
 	 */
 	public void setPartitionSelector(PartitionSelectorStrategy partitionSelector) {
@@ -275,8 +278,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Set the default retry back off initial interval for this bus; can be overridden
-	 * with consumer 'backOffInitialInterval' property.
+	 * Set the default retry back off initial interval for this bus; can be overridden with consumer
+	 * 'backOffInitialInterval' property.
 	 * @param defaultBackOffInitialInterval
 	 */
 	public void setDefaultBackOffInitialInterval(long defaultBackOffInitialInterval) {
@@ -284,8 +287,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Set the default retry back off multiplier for this bus; can be overridden
-	 * with consumer 'backOffMultiplier' property.
+	 * Set the default retry back off multiplier for this bus; can be overridden with consumer 'backOffMultiplier'
+	 * property.
 	 * @param defaultBackOffMultiplier
 	 */
 	public void setDefaultBackOffMultiplier(double defaultBackOffMultiplier) {
@@ -293,8 +296,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Set the default retry back off max interval for this bus; can be overridden
-	 * with consumer 'backOffMaxInterval' property.
+	 * Set the default retry back off max interval for this bus; can be overridden with consumer 'backOffMaxInterval'
+	 * property.
 	 * @param defaultBackOffMaxInterval
 	 */
 	public void setDefaultBackOffMaxInterval(long defaultBackOffMaxInterval) {
@@ -302,8 +305,7 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Set the default concurrency for this bus; can be overridden
-	 * with consumer 'concurrency' property.
+	 * Set the default concurrency for this bus; can be overridden with consumer 'concurrency' property.
 	 * @param defaultConcurrency
 	 */
 	public void setDefaultConcurrency(int defaultConcurrency) {
@@ -311,9 +313,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * The default maximum delivery attempts for this bus. Can be overridden by
-	 * consumer property 'maxAttempts' if supported. Values less than 2 disable
-	 * retry and one delivery attempt is made.
+	 * The default maximum delivery attempts for this bus. Can be overridden by consumer property 'maxAttempts' if
+	 * supported. Values less than 2 disable retry and one delivery attempt is made.
 	 * @param defaultMaxAttempts The default maximum attempts.
 	 */
 	public void setDefaultMaxAttempts(int defaultMaxAttempts) {
@@ -321,8 +322,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Set whether this bus batches message sends by default. Only applies
-	 * to bus implementations that support batching.
+	 * Set whether this bus batches message sends by default. Only applies to bus implementations that support
+	 * batching.
 	 * @param defaultBatchingEnabled the defaultBatchingEnabled to set.
 	 */
 	public void setDefaultBatchingEnabled(boolean defaultBatchingEnabled) {
@@ -330,8 +331,7 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Set the default batch size; only applies when batching is enabled and
-	 * the bus supports batching.
+	 * Set the default batch size; only applies when batching is enabled and the bus supports batching.
 	 * @param defaultBatchSize the defaultBatchSize to set.
 	 */
 	public void setDefaultBatchSize(int defaultBatchSize) {
@@ -339,9 +339,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Set the default batch buffer limit - used to send a batch early if
-	 * its size exceeds this. Only applies if batching is enabled and the
-	 * bus supports this property.
+	 * Set the default batch buffer limit - used to send a batch early if its size exceeds this. Only applies if
+	 * batching is enabled and the bus supports this property.
 	 * @param defaultBatchBufferLimit the defaultBatchBufferLimit to set.
 	 */
 	public void setDefaultBatchBufferLimit(int defaultBatchBufferLimit) {
@@ -349,9 +348,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Set the default batch timeout - used to send a batch if no messages
-	 * arrive during this time. Only applies if batching is enabled and the
-	 * bus supports this property.
+	 * Set the default batch timeout - used to send a batch if no messages arrive during this time. Only applies if
+	 * batching is enabled and the bus supports this property.
 	 * @param defaultBatchTimeout the defaultBatchTimeout to set.
 	 */
 	public void setDefaultBatchTimeout(long defaultBatchTimeout) {
@@ -366,9 +364,20 @@ public abstract class MessageBusSupport
 		this.defaultCompress = defaultCompress;
 	}
 
+	/**
+	 * Set whether subscriptions to taps/topics are durable.
+	 * @param defaultDurableSubscription true for durable (default false).
+	 */
+	public void setDefaultDurableSubscription(boolean defaultDurableSubscription) {
+		this.defaultDurableSubscription = defaultDurableSubscription;
+	}
+
 	@Override
 	public void afterPropertiesSet() throws Exception {
 		Assert.notNull(applicationContext, "The 'applicationContext' property cannot be null");
+		if (this.evaluationContext == null) {
+			this.evaluationContext = IntegrationContextUtils.getEvaluationContext(getBeanFactory());
+		}
 		onInit();
 	}
 
@@ -387,14 +396,15 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Create a producer for the named channel and bind it to the bus. Synchronized to
-	 * avoid creating multiple instances.
+	 * Create a producer for the named channel and bind it to the bus. Synchronized to avoid creating multiple
+	 * instances.
 	 * @param name The name.
 	 * @param channelName The name of the channel to be created, and registered as bean.
 	 * @param properties The properties.
 	 * @return The channel.
 	 */
-	protected synchronized MessageChannel doBindDynamicProducer(String name, String channelName, Properties properties) {
+	protected synchronized MessageChannel doBindDynamicProducer(String name, String channelName,
+			Properties properties) {
 		MessageChannel channel = this.directChannelProvider.lookupSharedChannel(channelName);
 		if (channel == null) {
 			try {
@@ -411,10 +421,9 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Dynamically create a producer for the named channel.
-	 * Note: even though it's pub/sub, we still use a
-	 * direct channel. It will be bridged to a pub/sub channel in the local
-	 * bus and bound to an appropriate element for other buses.
+	 * Dynamically create a producer for the named channel. Note: even though it's pub/sub, we still use a direct
+	 * channel. It will be bridged to a pub/sub channel in the local bus and bound to an appropriate element for other
+	 * buses.
 	 * @param name The name.
 	 * @param properties The properties.
 	 * @return The channel.
@@ -425,8 +434,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Create a producer for the named channel and bind it to the bus. Synchronized to
-	 * avoid creating multiple instances.
+	 * Create a producer for the named channel and bind it to the bus. Synchronized to avoid creating multiple
+	 * instances.
 	 * @param name The name.
 	 * @param channelName The name of the channel to be created, and registered as bean.
 	 * @param properties The properties.
@@ -476,6 +485,11 @@ public abstract class MessageBusSupport
 	@Override
 	public void unbindProducer(String name, MessageChannel channel) {
 		deleteBinding("outbound." + name, channel);
+	}
+
+	@Override
+	public boolean isCapable(Capability capability) {
+		return false;
 	}
 
 	protected void addBinding(Binding binding) {
@@ -545,28 +559,20 @@ public abstract class MessageBusSupport
 		}
 	}
 
-	protected final Message<?> serializePayloadIfNecessary(Message<?> message, MimeType to) {
+	protected final MessageValues serializePayloadIfNecessary(Message<?> message) {
 		Object originalPayload = message.getPayload();
 		Object originalContentType = message.getHeaders().get(MessageHeaders.CONTENT_TYPE);
-		Object contentType = originalContentType;
-		if (to.equals(ALL)) {
-			return message;
+
+		//Pass content type as String since some transport adapters will exclude CONTENT_TYPE Header otherwise
+		Object contentType = JavaClassMimeTypeConversion.mimeTypeFromObject(originalPayload).toString();
+		Object payload = serializePayloadIfNecessary(originalPayload);
+		MessageValues messageValues = new MessageValues(message);
+		messageValues.setPayload(payload);
+		messageValues.put(MessageHeaders.CONTENT_TYPE, contentType);
+		if (originalContentType != null) {
+			messageValues.put(XdHeaders.XD_ORIGINAL_CONTENT_TYPE, originalContentType);
 		}
-		else if (to.equals(APPLICATION_OCTET_STREAM)) {
-			//Pass content type as String since some transport adapters will exclude CONTENT_TYPE Header otherwise
-			contentType = JavaClassMimeTypeConversion.mimeTypeFromObject(originalPayload).toString();
-			Object payload = serializePayloadIfNecessary(originalPayload);
-			MessageBuilder<Object> messageBuilder = MessageBuilder.withPayload(payload)
-					.copyHeaders(message.getHeaders())
-					.setHeader(MessageHeaders.CONTENT_TYPE, contentType);
-			if (originalContentType != null) {
-				messageBuilder.setHeader(XdHeaders.XD_ORIGINAL_CONTENT_TYPE, originalContentType);
-			}
-			return messageBuilder.build();
-		}
-		else {
-			throw new IllegalArgumentException("'to' can only be 'ALL' or 'APPLICATION_OCTET_STREAM'");
-		}
+		return messageValues;
 	}
 
 	private byte[] serializePayloadIfNecessary(Object originalPayload) {
@@ -579,7 +585,7 @@ public abstract class MessageBusSupport
 				if (originalPayload instanceof String) {
 					return ((String) originalPayload).getBytes("UTF-8");
 				}
-				this.codec.serialize(originalPayload, bos);
+				this.codec.encode(originalPayload, bos);
 				return bos.toByteArray();
 			}
 			catch (IOException e) {
@@ -589,24 +595,28 @@ public abstract class MessageBusSupport
 		}
 	}
 
-	protected final Message<?> deserializePayloadIfNecessary(Message<?> message) {
-		Message<?> messageToSend = message;
+	protected final MessageValues deserializePayloadIfNecessary(Message<?> message) {
+		return deserializePayloadIfNecessary(new MessageValues(message));
+	}
+
+	protected final MessageValues deserializePayloadIfNecessary(MessageValues message) {
+		MessageValues messageToSend = message;
 		Object originalPayload = message.getPayload();
-		MimeType contentType = contentTypeResolver.resolve(message.getHeaders());
+		MimeType contentType = contentTypeResolver.resolve(messageToSend);
 		Object payload = deserializePayload(originalPayload, contentType);
 		if (payload != null) {
-			MessageBuilder<Object> transformed = MessageBuilder.withPayload(payload).copyHeaders(message.getHeaders());
-			Object originalContentType = message.getHeaders().get(XdHeaders.XD_ORIGINAL_CONTENT_TYPE);
-			transformed.setHeader(MessageHeaders.CONTENT_TYPE, originalContentType);
-			transformed.setHeader(XdHeaders.XD_ORIGINAL_CONTENT_TYPE, null);
-			messageToSend = transformed.build();
+			messageToSend.setPayload(payload);
+
+			Object originalContentType = messageToSend.get(XdHeaders.XD_ORIGINAL_CONTENT_TYPE);
+			messageToSend.put(MessageHeaders.CONTENT_TYPE, originalContentType);
+			messageToSend.put(XdHeaders.XD_ORIGINAL_CONTENT_TYPE, null);
 		}
 		return messageToSend;
 	}
 
 	private Object deserializePayload(Object payload, MimeType contentType) {
 		if (payload instanceof byte[]) {
-			if (APPLICATION_OCTET_STREAM.equals(contentType)) {
+			if (contentType == null || APPLICATION_OCTET_STREAM.equals(contentType)) {
 				return payload;
 			}
 			else {
@@ -617,41 +627,40 @@ public abstract class MessageBusSupport
 	}
 
 	private Object deserializePayload(byte[] bytes, MimeType contentType) {
-		Class<?> targetType = null;
-		try {
-			if (contentType.equals(TEXT_PLAIN)) {
+		if (TEXT_PLAIN.equals(contentType)) {
+			try {
 				return new String(bytes, "UTF-8");
 			}
+			catch (UnsupportedEncodingException e) {
+				throw new SerializationException("unable to deserialize [java.lang.String]. Encoding not supported.", e);
+			}
+		}
+		else {
 			String className = JavaClassMimeTypeConversion.classNameFromMimeType(contentType);
-			targetType = Class.forName(className);
-
-			return codec.deserialize(bytes, targetType);
+			try {
+				// Cache types to avoid unnecessary ClassUtils.forName calls.
+				Class<?> targetType = payloadTypeCache.get(className);
+				if (targetType == null) {
+					targetType = ClassUtils.forName(className, null);
+					payloadTypeCache.put(className, targetType);
+				}
+				return codec.decode(bytes, targetType);
+			} catch (ClassNotFoundException e) {
+				throw new SerializationException("unable to deserialize [" + className + "]. Class not found.", e);//NOSONAR
+			} catch (IOException e) {
+				throw new SerializationException("unable to deserialize [" + className + "]", e);
+			}
 		}
-		catch (ClassNotFoundException e) {
-			throw new SerializationException("unable to deserialize [" + targetType + "]. Class not found.", e);
-		}
-		catch (IOException e) {
-			throw new SerializationException("unable to deserialize [" + targetType + "]", e);
-		}
-
 	}
 
 	/**
-	 * Determine the partition to which to send this message.
-	 * If a partition key extractor class is provided, it is invoked to determine the key.
-	 * Otherwise, the partition key expression is evaluated to obtain the
-	 * key value.
-	 * If a partition selector class is provided, it will be invoked to determine the
-	 * partition. Otherwise,
-	 * if the partition expression is not null, it is evaluated
-	 * against the key and is expected to return an integer to which the modulo function
-	 * will be applied, using the partitionCount as the divisor.
-	 * <p>
-	 * If no partition expression is provided, the key will be passed to the bus partition
-	 * strategy along with the partitionCount.
-	 * The default partition strategy uses {@code key.hashCode()}, and the result will
-	 * be the mod of that value.
-	 *
+	 * Determine the partition to which to send this message. If a partition key extractor class is provided, it is
+	 * invoked to determine the key. Otherwise, the partition key expression is evaluated to obtain the key value. If a
+	 * partition selector class is provided, it will be invoked to determine the partition. Otherwise, if the partition
+	 * expression is not null, it is evaluated against the key and is expected to return an integer to which the modulo
+	 * function will be applied, using the partitionCount as the divisor. If no partition expression is provided, the
+	 * key will be passed to the bus partition strategy along with the partitionCount. The default partition strategy
+	 * uses {@code key.hashCode()}, and the result will be the mod of that value.
 	 * @param message the message.
 	 * @param meta the partitioning metadata.
 	 * @return the partition.
@@ -730,15 +739,15 @@ public abstract class MessageBusSupport
 		}
 		catch (Exception e) {
 			logger.error("Failed to instantiate partition selector", e);
-			throw new MessageBusException("Failed to instantiate partition selector: " + partitionSelectorClassName, e);
+			throw new MessageBusException("Failed to instantiate partition selector: " + partitionSelectorClassName,
+					e);
 		}
 	}
 
 	/**
-	 * Validate the provided deployment properties for the consumer against those supported by
-	 * this bus implementation. The consumer is that part of the bus that consumes messages from
-	 * the underlying infrastructure and sends them to the next module. Consumer properties are
-	 * used to configure the consumer.
+	 * Validate the provided deployment properties for the consumer against those supported by this bus implementation.
+	 * The consumer is that part of the bus that consumes messages from the underlying infrastructure and sends them to
+	 * the next module. Consumer properties are used to configure the consumer.
 	 * @param name The name.
 	 * @param properties The properties.
 	 * @param supported The supported properties.
@@ -750,9 +759,9 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Validate the provided deployment properties for the producer against those supported by
-	 * this bus implementation. When a module sends a message to the bus, the producer uses
-	 * these properties while sending it to the underlying infrastructure.
+	 * Validate the provided deployment properties for the producer against those supported by this bus implementation.
+	 * When a module sends a message to the bus, the producer uses these properties while sending it to the underlying
+	 * infrastructure.
 	 * @param name The name.
 	 * @param properties The properties.
 	 * @param supported The supported properties.
@@ -760,6 +769,7 @@ public abstract class MessageBusSupport
 	protected void validateProducerProperties(String name, Properties properties, Set<Object> supported) {
 		if (properties != null) {
 			validateProperties(name, properties, supported, "producer");
+			validatePartitioning(name, properties);
 		}
 	}
 
@@ -779,6 +789,27 @@ public abstract class MessageBusSupport
 					+ (errors == 1 ? "y: " : "ies: ")
 					+ builder.substring(0, builder.length() - 1)
 					+ " for " + name + ".");
+		}
+	}
+
+	private void validatePartitioning(String name, Properties properties) {
+		if (!isCapable(Capability.NATIVE_PARTITIONING)
+				&& (StringUtils.hasText(properties.getProperty(BusProperties.PARTITION_KEY_EXPRESSION))
+				|| StringUtils.hasText(properties.getProperty(BusProperties.PARTITION_KEY_EXTRACTOR_CLASS)))) {
+			String nextModuleCount = properties.getProperty(BusProperties.NEXT_MODULE_COUNT);
+			Assert.hasText(nextModuleCount,
+					String.format(getClass().getSimpleName() + " requires partitioned data to be sent to a module "
+							+ "having 'count' > 1 for '%s'", name));
+			try {
+				Assert.isTrue(Integer.parseInt(nextModuleCount) > 1,
+						String.format(getClass().getSimpleName() + " requires that module '%s' sends partitioned data to a"
+								+ " module having 'count' > 1", name));
+			}
+			catch (NumberFormatException e) {
+				throw new IllegalArgumentException(String.format("Property '%s' for " +
+								"module '%s' does not contain a valid integer, current value is '%s'",
+						BusProperties.NEXT_MODULE_COUNT, name, nextModuleCount));
+			}
 		}
 	}
 
@@ -816,8 +847,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Attempt to create a direct binding (avoiding the bus) if the consumer is local.
-	 * Named channel producers are not bound directly.
+	 * Attempt to create a direct binding (avoiding the bus) if the consumer is local. Named channel producers are not
+	 * bound directly.
 	 * @param name The name.
 	 * @param moduleOutputChannel The channel to bind.
 	 * @param properties The producer properties.
@@ -872,8 +903,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Attempt to bind a producer directly (avoiding the bus) if there is already a local producer.
-	 * PubSub producers cannot be bound directly. Create the direct binding, then unbind the existing bus producer.
+	 * Attempt to bind a producer directly (avoiding the bus) if there is already a local producer. PubSub producers
+	 * cannot be bound directly. Create the direct binding, then unbind the existing bus producer.
 	 * @param name The name.
 	 * @param consumerChannel The channel to bind the producer to.
 	 */
@@ -930,8 +961,8 @@ public abstract class MessageBusSupport
 	}
 
 	/**
-	 * Default partition strategy; only works on keys with "real" hash codes, such as String.
-	 * Caller now always applies modulo so no need to do so here.
+	 * Default partition strategy; only works on keys with "real" hash codes, such as String. Caller now always applies
+	 * modulo so no need to do so here.
 	 */
 	private class DefaultPartitionSelector implements PartitionSelectorStrategy {
 
@@ -958,12 +989,12 @@ public abstract class MessageBusSupport
 
 		private final int partitionCount;
 
-		public PartitioningMetadata(AbstractBusPropertiesAccessor properties) {
+		public PartitioningMetadata(AbstractBusPropertiesAccessor properties, int partitionCount) {
+			this.partitionCount = partitionCount;
 			this.partitionKeyExtractorClass = properties.getPartitionKeyExtractorClass();
 			this.partitionKeyExpression = properties.getPartitionKeyExpression();
 			this.partitionSelectorClass = properties.getPartitionSelectorClass();
 			this.partitionSelectorExpression = properties.getPartitionSelectorExpression();
-			this.partitionCount = properties.getPartitionCount();
 		}
 
 		public boolean isPartitionedModule() {
@@ -977,7 +1008,6 @@ public abstract class MessageBusSupport
 
 	/**
 	 * Looks up or optionally creates a new channel to use.
-	 *
 	 * @author Eric Bottard
 	 */
 	protected abstract class SharedChannelProvider<T extends MessageChannel> {
@@ -1027,31 +1057,42 @@ public abstract class MessageBusSupport
 
 	/**
 	 * Handles representing any java class as a {@link MimeType}.
-	 * @see <a href="http://docs.oracle.com/javase/7/docs/api/java/lang/Class.html#getName"/>
 	 * @author David Turanski
+	 * @see <a href="http://docs.oracle.com/javase/7/docs/api/java/lang/Class.html#getName"/>
 	 */
 	abstract static class JavaClassMimeTypeConversion {
+
+		public static final MimeType APPLICATION_OCTET_STREAM_MIME_TYPE = MimeType.valueOf(APPLICATION_OCTET_STREAM_VALUE);
+
+		public static final MimeType TEXT_PLAIN_MIME_TYPE = MimeType.valueOf(TEXT_PLAIN_VALUE);
+
+		private static ConcurrentMap<String, MimeType> mimeTypesCache = new ConcurrentHashMap<>();
 
 		static MimeType mimeTypeFromObject(Object obj) {
 			Assert.notNull(obj, "object cannot be null.");
 			if (obj instanceof byte[]) {
-				return MimeType.valueOf(APPLICATION_OCTET_STREAM_VALUE);
+				return APPLICATION_OCTET_STREAM_MIME_TYPE;
 			}
 			if (obj instanceof String) {
-				return MimeType.valueOf(TEXT_PLAIN_VALUE);
+				return TEXT_PLAIN_MIME_TYPE;
 			}
 			String className = obj.getClass().getName();
-			if (obj.getClass().isArray()) {
-				// Need to remove trailing ';' for an object array, e.g. "[Ljava.lang.String;" or multi-dimensional "[[[Ljava.lang.String;"
-				if (className.endsWith(";")) {
-					className = className.substring(0, className.length() - 1);
+			MimeType mimeType = mimeTypesCache.get(className);
+			if (mimeType == null) {
+				String modifiedClassName = className;
+				if (obj.getClass().isArray()) {
+					// Need to remove trailing ';' for an object array, e.g. "[Ljava.lang.String;" or multi-dimensional
+					// "[[[Ljava.lang.String;"
+					if (modifiedClassName.endsWith(";")) {
+						modifiedClassName = modifiedClassName.substring(0, modifiedClassName.length() - 1);
+					}
+					// Wrap in quotes to handle the illegal '[' character
+					modifiedClassName = "\"" + modifiedClassName + "\"";
 				}
-				// Wrap in quotes to handle the illegal '[' character
-				className = "\"" + className + "\"";
+				mimeType = MimeType.valueOf("application/x-java-object;type=" + modifiedClassName);
+				mimeTypesCache.put(className, mimeType);
 			}
-
-			String mimeType = "application/x-java-object;type=" + className;
-			return MimeType.valueOf(mimeType);
+			return mimeType;
 		}
 
 		static String classNameFromMimeType(MimeType mimeType) {

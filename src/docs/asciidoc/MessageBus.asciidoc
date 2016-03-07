@@ -1,16 +1,17 @@
 [[messagebus]]
-ifndef::env-github[]
 == Message Bus Configuration
-endif::[]
 
 === Introduction
 
-This section contains additional information about configuring the Message Bus, including High Availability, SSL, and Error handling.
+This section contains additional information about configuring the Message Bus, including High Availability, SSL,
+Error handling and partitioning.
 
 [[rabbit-message-bus-high-availability-ha-configuration]]
 === Rabbit Message Bus High Availability (HA) Configuration
 
-The +RabbitMessageBus+ allows for HA configuration using normal https://www.rabbitmq.com/ha.html[RabbitMQ HA Configuration]. 
+==== Introduction
+
+The +RabbitMessageBus+ allows for HA configuration using normal https://www.rabbitmq.com/ha.html[RabbitMQ HA Configuration].
 
 First, use the +addresses+ property in +servers.yml+ to include the host/port for each server in the cluster. See xref:Application-Configuration#rabbitConfig[Application Configuration].
 
@@ -19,6 +20,20 @@ By default, queues and exchanges declared by the bus are prefixed with +xdbus.+ 
 To configure the entire bus for HA, create a policy:
 
 +rabbitmqctl set_policy ha-xdbus "^xdbus\." \'{"ha-mode":"all"}'+
+
+==== Connection Management and HA Queues
+
+When consuming from HA queues, there might be some performance advantage in consuming from the node that actually hosts
+the queue.
+Starting with _version 1.2_ it is now possible to configure the Rabbit Message Bus to do that.
+
+CAUTION: To utilize this mechanism, the https://www.rabbitmq.com/management.html[rabbit management plugin] must be enabled on each node in the cluster.
+The plugin's REST API is used to determine the location of the queue.
+
+This feature is enabled by adding more than one node to the +spring.rabbitmq.node+ property.
+See xref:Application-Configuration#rabbitConfig[RabbitMQ Configuration] for configuration details.
+
+When a node fails and a queue is moved to one of the mirrors, the bus will automatically reconnect to the right node.
 
 [[error-handling-message-delivery-failures]]
 === Error Handling (Message Delivery Failures)
@@ -56,13 +71,23 @@ There is no automated mechanism provided to move dead lettered messages back to 
 
 *Automatic Dead Lettering Queue Binding*
 
-Starting with _version 1.1_, the dead letter queue and binding can be automatically configured by the system. A new property +autoBindDLQ+ has been added; it can be set at the bus level (in +servers.yml+) or using deployment properties, e.g. +--properties module.*.consumer.autoBindDLQ=true+ for all modules in the stream. When +true+, the dead letter queue will be declared (if necessary) and bound to a dead letter exchange named +xdbus.DLX+ (again, assuming the default +prefix+).
+Starting with _version 1.1_, the dead letter queue and binding can be automatically configured by the system. A new property +autoBindDLQ+ has been added; it can be set at the bus level (in +servers.yml+) or using deployment properties, e.g. +--properties module.*.consumer.autoBindDLQ=true+ for all modules in the stream. When +true+, the dead letter queue will be declared (if necessary) and bound to a dead letter exchange named +xdbus.DLX+ (again, assuming the default +prefix+) using the queue name as the routing key.
 
 In the above example, where we have queues +xdbus.foo.0+ and +xdbus.foo.1+, the system will also create +xdbus.foo.0.dlq+, bound to +xdbus.DLX+ with routing key +xdbus.foo.0+ and +xdbus.foo.1.dlq+, bound to +xdbus.DLX+ with routing key +xdbus.foo.1+.
 
-NOTE: This just sets up the DLQ and binding, you still need to set a policy to enable dead lettering on the queues, routing failed messages to +xdbus.DLX+:
+NOTE: Starting with _version 1.2_, any queues that are deployed with `autoBindDLQ` will automatically be configured to enable dead-lettering, routing to the DLX with the proper routing key. It is no longer necessary to use a policy to set up dead-lettering when using `autoBindDLQ`.
 
-+rabbitmqctl set_policy DLX "^xdbus\..*" \'{"dead-letter-exchange":"xdbus.DLX"}' --apply-to queues+
+Also, starting with _version 1.2_, the provision of dead-lettering on publish/subscribe named channels (`tap:` or `topic:`) depends on a new deployment property `durable`.
+This property is similar to a JMS durable subscription to a topic and is `false` by default.
+When `false` (default), the queue backing such a named channel is declared `auto-delete` and is removed when the stream is undeployed.
+A DLQ will not be created for such queues.
+When `true`, the queue becomes permanent (durable) and is not removed when the stream is undeployed.
+Also, when `true`, the queue is eligible for DLQ provisioning, according to the `autoBindDLQ` deployment property.
+`durable` can be set at the bus level, or in an individual deployment property, such as:
+
+`stream create ticktock --definition="time --fixedDelay=5 | log" --deploy`
+`stream create tttap --definition="tap:stream:ticktock > log"`
+`stream deploy tttap --properties=module.log.consumer.durableSubscription=true`
 
 ==== Redis Message Bus
 
@@ -113,7 +138,7 @@ If you wish to use SSL for communications with the RabbitMQ server, consult the 
 
 First configure the broker as described there. The message bus is a client of the broker and supports both of the described configurations for connecting clients (SSL _without certificate validation_ and _with certficate validation_).
 
-To use SSL without certificate validation, simply set 
+To use SSL without certificate validation, simply set
 
 ----
 spring:
@@ -121,15 +146,20 @@ spring:
     useSSL: true
 ----
 
-In +application.yml+ (and set the port(s) in the +addresses+ property appropriately).
+In +servers.yml+ (and set the port(s) in the +addresses+ property appropriately).
 
-To use SSL with certificate validation, set 
+To use SSL with certificate validation, set
 
 ----
 spring:
   rabbitmq:
     useSSL: true
     sslProperties: file:path/to/secret/ssl.properties
+    #ssl:
+      #   keyStore:
+      #   keyStorePassphrase:
+      #   trustStore:
+      #   trustStorePassphrase:
 ----
 
 The +sslProperties+ property is a Spring resource (+file:+, +classpath:+ etc) that points to a properties file, Typically, this file would be secured by the operating system (and readable by the XD container) because it contains security information. Specifically:
@@ -143,7 +173,116 @@ trustStore.passPhrase=secret
 
 Where the +pkcs12+ keystore contains the client certificate and the truststore contains the server's certificate as described in the rabbit documentation. The key/trust store properties are Spring resources.
 
-NOTE: By default, the +rabbit+ source and sink modules inherit their default configuration from the container, but it can be overridden, either using +modules.yml+ or with specific module definitions.
+Alternately, you may specify these properties in-line in lieu of using an external properties file.
+In this case,the passphrase properties may be encrypted.
+See xref:Application-Configuration#encrypted-properties[Encrypted Properties] for more details.
+When both +sslProperties+ and in-line +ssl+ properties are configured,the in-line properties take precedence.
+
+NOTE: By default, the +rabbit+ source and sink modules inherit their default configuration from the container, but it
+can be overridden, either using +modules.yml+ or with specific module definitions.
 
 === Rabbit Message Bus Batching and Compression
-See xref:Application-Configuration#rabbitBusProps[RabbitMQ Message Bus Properties] for information about batching and compressing messages passing through the bus.
+See xref:Application-Configuration#rabbitBusProps[RabbitMQ Message Bus Properties] for information about batching and
+compressing messages passing through the bus.
+
+=== Removing RabbitMQ MessageBus Resources
+
+When a stream or job is undeployed, the broker resources (queues, exchanges) are NOT removed from RabbitMQ.
+This is due to the possibility that a stream might be being undeployed temporarily, and avoids message loss.
+
+If you wish to completely remove these resources, a REST API is provided for this purpose. In addition, the
+`SpringXDTemplate` provides a Java binding for this REST api via its `streamOperations().cleanBusResources(String name)`
+and `jobOperations().cleanBusResources(String name)` APIs.
+
+Or, you can use the REST API directly; for example:
+
+[source]
+----
+curl 'http://localhost:9393/streams/clean/rabbit/foo\
+     ?user=guest&pw=guest&vhost=/&busPrefix=xdbus.&adminUri=http://localhost:15672'
+
+curl 'http://localhost:9393/jobs/clean/rabbit/bar\
+    ?user=guest&pw=guest&vhost=/&busPrefix=xdbus.&adminUri=http://localhost:15672'
+----
+
+Where `foo` is the stream name and `bar` is the job name.
+
+The stream or job name supports a simple wildcard syntax; if it ends with `*`, then all streams beginning with the
+name (excluding the `*`) will be cleaned.
+
+These operations remove the inter-module stream queues, any tap exchanges created for the stream, the job queue and
+request queue for partitioned jobs.
+
+The operation will fail if any queue currently has a consumer; similarly, the operation will fail if any exchange
+has a binding. Under either condition, no changes will be made to RabbitMQ.
+
+The following query params are supported:
+
+* adminUri - location of the RabbitMQ Admin (default `http://localhost:15672`)
+* user - admin user (default `guest`)
+* pw - admin password (default `guest`)
+* vhost - the vhost used for the bus resources (default `/`)
+* busPrefix - the prefix used for all bus resources (default `xdbus.`)
+
+[[kafka-bus-partitions]]
+=== Kafka Message Bus Partition Control
+
+This section describes how topic partitioning functions when using Kafka as transport.
+
+[[kafka-partition-control]]
+==== Controlling the partition count of a transport topic
+
+The _KafkaMessageBus_ will attempt to set the number of partitions in a transport topic as _consumerCount * consumerConcurrency_,
+either by creating the topic with the required number of partitions, or by repartitioning it, in case it exists.
+
+For example, let's consider a stream with the following definition:
+
+----
+stream create ingest --definition="http | hdfs"
+----
+
+A default deployment will result in the creation of a single topic with a single partition.
+
+----
+stream deploy ingest
+----
+
+A deployment (or redeployment) of the same stream with a different module count and concurrency will result in
+6 partitions, evenly distributed across the 3 module instances:
+
+----
+stream deploy ingest --properties module.hdfs.count=3,module.hdfs.concurrency=2
+----
+
+Besides relying on defaults, you can customize the number of Kafka partitions used by transport topics by indicating a
+minimum value to be used by deployments (by minimum, it is understood that, if smaller than
+_consumerCount * consumerConcurrency_, the latter value will be used instead).
+
+This can be done globally by changing the `xd.messagebus.kafka.default.minPartitionCount` property in
+`servers.yml`:
+
+----
+xd:
+  messagebus:
+    kafka:
+      default:
+        minPartitionCount:   5
+----
+
+This will result in creating at least 5 partitions for each transport topic.
+
+Alternatively, and for more granular control, the property can be specified for specific deployments and modules,
+through the `producer.minPartitionCount` property in the deployment manifest, as in the following example, where
+10 partitions will be created:
+
+[source]
+----
+stream deploy ingest --properties module.http.producer.minPartitionCount=10,module.hdfs.count=3
+----
+
+Overpartitioning can serve a number of purposes, such as load balancing and distributing data among brokers, as well as
+ allowing for scaling up by increasing the number of concurrent consumers in the future.
+
+NOTE: If the Kafka topic already exists and it already has a number of partitions larger than either `minPartitionCount`
+or _consumerCount * consumerConcurrency_, its partition count will remain unchanged, and the Kafka transport will operate
+with all the existing partitions.

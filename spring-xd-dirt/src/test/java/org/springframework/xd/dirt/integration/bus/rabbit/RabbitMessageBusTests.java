@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2015 the original author or authors.
+ * Copyright 2013-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import static org.hamcrest.Matchers.startsWith;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
@@ -31,6 +32,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -67,6 +69,7 @@ import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.MessagingException;
 import org.springframework.messaging.support.GenericMessage;
 import org.springframework.xd.dirt.integration.bus.Binding;
+import org.springframework.xd.dirt.integration.bus.BusProperties;
 import org.springframework.xd.dirt.integration.bus.MessageBus;
 import org.springframework.xd.dirt.integration.bus.PartitionCapableBusTests;
 import org.springframework.xd.test.rabbit.RabbitTestSupport;
@@ -174,9 +177,8 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		}
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
-					containsString("RabbitMessageBus does not support consumer properties: "),
+					containsString("RabbitMessageBus does not support consumer property: "),
 					containsString("partitionIndex"),
-					containsString("concurrency"),
 					containsString(" for dummy.")));
 		}
 		try {
@@ -218,7 +220,7 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		properties.put("partitionKeyExtractorClass", "foo");
 		properties.put("partitionSelectorExpression", "0");
 		properties.put("partitionSelectorClass", "foo");
-		properties.put("partitionCount", "1");
+		properties.put(BusProperties.NEXT_MODULE_COUNT, "2");
 
 		bus.bindProducer("props.0", new DirectChannel(), properties);
 		assertEquals(1, bindings.size());
@@ -238,7 +240,6 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
 					containsString("RabbitMessageBus does not support producer properties: "),
-					containsString("partitionCount"),
 					containsString("partitionSelectorExpression"),
 					containsString("partitionKeyExtractorClass"),
 					containsString("partitionKeyExpression"),
@@ -252,7 +253,6 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
 					containsString("RabbitMessageBus does not support producer properties: "),
-					containsString("partitionCount"),
 					containsString("partitionSelectorExpression"),
 					containsString("partitionKeyExtractorClass"),
 					containsString("partitionKeyExpression"),
@@ -309,7 +309,7 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		properties.put("partitionKeyExtractorClass", "foo");
 		properties.put("partitionSelectorExpression", "0");
 		properties.put("partitionSelectorClass", "foo");
-		properties.put("partitionCount", "1");
+		properties.put(BusProperties.NEXT_MODULE_COUNT, "1");
 		properties.put("partitionIndex", "0");
 		try {
 			bus.bindRequestor("dummy", null, null, properties);
@@ -318,7 +318,6 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
 					containsString("RabbitMessageBus does not support producer properties: "),
-					containsString("partitionCount"),
 					containsString("partitionSelectorExpression"),
 					containsString("partitionKeyExtractorClass"),
 					containsString("partitionKeyExpression"),
@@ -378,7 +377,7 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		properties.put("partitionKeyExtractorClass", "foo");
 		properties.put("partitionSelectorExpression", "0");
 		properties.put("partitionSelectorClass", "foo");
-		properties.put("partitionCount", "1");
+		properties.put(BusProperties.NEXT_MODULE_COUNT, "1");
 		properties.put("partitionIndex", "0");
 		try {
 			bus.bindReplier("dummy", null, null, properties);
@@ -387,7 +386,6 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		catch (IllegalArgumentException e) {
 			assertThat(e.getMessage(), allOf(
 					containsString("RabbitMessageBus does not support consumer properties: "),
-					containsString("partitionCount"),
 					containsString("partitionSelectorExpression"),
 					containsString("partitionKeyExtractorClass"),
 					containsString("partitionKeyExpression"),
@@ -401,13 +399,98 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 	}
 
 	@Test
-	public void testAutoBindDLQ() throws Exception {
-		// pre-declare the queue with dead-lettering, users can also use a policy
+	public void testDurablePubSubWithAutoBindDLQ() throws Exception {
 		RabbitAdmin admin = new RabbitAdmin(this.rabbitAvailableRule.getResource());
-		Map<String, Object> args = new HashMap<String, Object>();
-		args.put("x-dead-letter-exchange", "xdbustest.DLX");
-		Queue queue = new Queue("xdbustest.dlqtest", true, false, false, args);
-		admin.declareQueue(queue);
+
+		MessageBus bus = getMessageBus();
+		Properties properties = new Properties();
+		properties.put("prefix", "xdbustest.");
+		properties.put("autoBindDLQ", "true");
+		properties.put("durableSubscription", "true");
+		properties.put("maxAttempts", "1"); // disable retry
+		properties.put("requeue", "false");
+		properties.put("concurrency", "2");
+		DirectChannel moduleInputChannel = new DirectChannel();
+		moduleInputChannel.setBeanName("durableTest");
+		final List<Thread> threads = new ArrayList<>();
+		moduleInputChannel.subscribe(new MessageHandler() {
+
+			@Override
+			public void handleMessage(Message<?> message) throws MessagingException {
+				threads.add(Thread.currentThread());
+				throw new RuntimeException("foo");
+			}
+
+		});
+		bus.bindPubSubConsumer("teststream.tap:stream:durabletest.0", moduleInputChannel, properties);
+
+		RabbitTemplate template = new RabbitTemplate(this.rabbitAvailableRule.getResource());
+		template.convertAndSend("xdbustest.topic.tap:stream:durabletest.0", "", "foo");
+
+		template.setReceiveTimeout(10000);
+		Object deadLetter = template.receiveAndConvert("xdbustest.teststream.tap:stream:durabletest.0.dlq");
+		assertNotNull(deadLetter);
+		assertEquals("foo", deadLetter);
+
+		template.convertAndSend("xdbustest.topic.tap:stream:durabletest.0", "", "bar");
+
+		deadLetter = template.receiveAndConvert("xdbustest.teststream.tap:stream:durabletest.0.dlq");
+		assertNotNull(deadLetter);
+		assertEquals("bar", deadLetter);
+
+		template.setReceiveTimeout(10);
+		assertNull(template.receiveAndConvert("xdbustest.teststream.tap:stream:durabletest.0.dlq"));
+		assertEquals(2, threads.size());
+		assertNotSame(threads.get(0), threads.get(1));
+
+		@SuppressWarnings("unchecked")
+		List<Binding> bindings = TestUtils.getPropertyValue(bus, "messageBus.bindings", List.class);
+		assertEquals(1, bindings.size());
+		assertEquals(2,
+				TestUtils.getPropertyValue(bindings.get(0), "endpoint.messageListenerContainer.concurrentConsumers"));
+
+		bus.unbindConsumer("teststream.tap:stream:durabletest.0", moduleInputChannel);
+		assertNotNull(admin.getQueueProperties("xdbustest.teststream.tap:stream:durabletest.0.dlq"));
+		admin.deleteQueue("xdbustest.teststream.tap:stream:durabletest.0.dlq");
+		admin.deleteQueue("xdbustest.teststream.tap:stream:durabletest.0");
+		admin.deleteExchange("xdbustest.topic.tap:stream:durabletest.0");
+		admin.deleteExchange("xdbustest.DLX");
+
+		assertEquals(0, bindings.size());
+	}
+
+	@Test
+	public void testNonDurablePubSubWithAutoBindDLQ() throws Exception {
+		RabbitAdmin admin = new RabbitAdmin(this.rabbitAvailableRule.getResource());
+
+		MessageBus bus = getMessageBus();
+		Properties properties = new Properties();
+		properties.put("prefix", "xdbustest.");
+		properties.put("autoBindDLQ", "true");
+		properties.put("durableSubscription", "false");
+		properties.put("maxAttempts", "1"); // disable retry
+		properties.put("requeue", "false");
+		DirectChannel moduleInputChannel = new DirectChannel();
+		moduleInputChannel.setBeanName("nondurabletest");
+		moduleInputChannel.subscribe(new MessageHandler() {
+
+			@Override
+			public void handleMessage(Message<?> message) throws MessagingException {
+				throw new RuntimeException("foo");
+			}
+
+		});
+		bus.bindPubSubConsumer("teststream.tap:stream:nondurabletest.0", moduleInputChannel, properties);
+
+		bus.unbindConsumer("teststream.tap:stream:nondurabletest.0", moduleInputChannel);
+		assertNull(admin.getQueueProperties("xdbustest.teststream.tap:stream:nondurabletest.0.dlq"));
+		admin.deleteQueue("xdbustest.teststream.tap:stream:nondurabletest.0");
+		admin.deleteExchange("xdbustest.topic.tap:stream:nondurabletest.0");
+	}
+
+	@Test
+	public void testAutoBindDLQ() throws Exception {
+		RabbitAdmin admin = new RabbitAdmin(this.rabbitAvailableRule.getResource());
 
 		MessageBus bus = getMessageBus();
 		Properties properties = new Properties();
@@ -444,6 +527,88 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 		bus.unbindConsumer("dlqtest", moduleInputChannel);
 		admin.deleteQueue("xdbustest.dlqtest.dlq");
 		admin.deleteQueue("xdbustest.dlqtest");
+		admin.deleteExchange("xdbustest.DLX");
+	}
+
+	@Test
+	public void testAutoBindDLQPartioned() throws Exception {
+		RabbitAdmin admin = new RabbitAdmin(this.rabbitAvailableRule.getResource());
+
+		MessageBus bus = getMessageBus();
+		Properties properties = new Properties();
+		properties.put("prefix", "xdbustest.");
+		properties.put("autoBindDLQ", "true");
+		properties.put("maxAttempts", "1"); // disable retry
+		properties.put("requeue", "false");
+		properties.put("partitionIndex", "0");
+		DirectChannel input0 = new DirectChannel();
+		input0.setBeanName("test.input0DLQ");
+		bus.bindConsumer("partDLQ.0", input0, properties);
+		properties.put("partitionIndex", "1");
+		DirectChannel input1 = new DirectChannel();
+		input1.setBeanName("test.input1DLQ");
+		bus.bindConsumer("partDLQ.0", input1, properties);
+
+		properties.clear();
+		properties.put("prefix", "xdbustest.");
+		properties.put("partitionKeyExtractorClass", "org.springframework.xd.dirt.integration.bus.PartitionTestSupport");
+		properties.put("partitionSelectorClass", "org.springframework.xd.dirt.integration.bus.PartitionTestSupport");
+		properties.put(BusProperties.NEXT_MODULE_COUNT, "2");
+		DirectChannel output = new DirectChannel();
+		output.setBeanName("test.output");
+		bus.bindProducer("partDLQ.0", output, properties);
+
+		final CountDownLatch latch0 = new CountDownLatch(1);
+		input0.subscribe(new MessageHandler() {
+
+			@Override
+			public void handleMessage(Message<?> message) throws MessagingException {
+				if (latch0.getCount() <= 0) {
+					throw new RuntimeException("dlq");
+				}
+				latch0.countDown();
+			}
+
+		});
+
+		final CountDownLatch latch1 = new CountDownLatch(1);
+		input1.subscribe(new MessageHandler() {
+
+			@Override
+			public void handleMessage(Message<?> message) throws MessagingException {
+				if (latch1.getCount() <= 0) {
+					throw new RuntimeException("dlq");
+				}
+				latch1.countDown();
+			}
+
+		});
+
+		output.send(new GenericMessage<Integer>(1));
+		assertTrue(latch1.await(10, TimeUnit.SECONDS));
+
+		output.send(new GenericMessage<Integer>(0));
+		assertTrue(latch0.await(10, TimeUnit.SECONDS));
+
+		output.send(new GenericMessage<Integer>(1));
+
+		RabbitTemplate template = new RabbitTemplate(this.rabbitAvailableRule.getResource());
+		template.setReceiveTimeout(10000);
+
+		String streamDLQName = "xdbustest.partDLQ.0.dlq";
+
+		org.springframework.amqp.core.Message received = template.receive(streamDLQName);
+		assertNotNull(received);
+		assertEquals(1, received.getMessageProperties().getHeaders().get("partition"));
+
+		output.send(new GenericMessage<Integer>(0));
+		received = template.receive(streamDLQName);
+		assertNotNull(received);
+		assertEquals(0, received.getMessageProperties().getHeaders().get("partition"));
+
+		admin.deleteQueue(streamDLQName);
+		admin.deleteQueue("xdbustest.partDLQ.0-0");
+		admin.deleteQueue("xdbustest.partDLQ.0-1");
 		admin.deleteExchange("xdbustest.DLX");
 	}
 
@@ -624,7 +789,7 @@ public class RabbitMessageBusTests extends PartitionCapableBusTests {
 	@Override
 	public Spy spyOn(final String queue) {
 		final RabbitTemplate template = new RabbitTemplate(this.rabbitAvailableRule.getResource());
-		template.setAfterReceivePostProcessor(new DelegatingDecompressingPostProcessor());
+		template.setAfterReceivePostProcessors(new DelegatingDecompressingPostProcessor());
 		return new Spy() {
 
 			@Override

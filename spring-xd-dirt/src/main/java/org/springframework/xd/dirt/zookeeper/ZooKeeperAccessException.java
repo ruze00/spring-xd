@@ -16,15 +16,15 @@
 
 package org.springframework.xd.dirt.zookeeper;
 
-import org.springframework.xd.dirt.XDRuntimeException;
-
+import org.springframework.xd.dirt.DirtException;
 
 /**
- * Runtime exception used to wrap native ZooKeeper checked exceptions thrown while accessing ZooKeeper nodes.
+ * Runtime exception used to wrap native ZooKeeper checked exceptions thrown while
+ * accessing ZooKeeper nodes.
  * @author dturanski
  */
 @SuppressWarnings("serial")
-public class ZooKeeperAccessException extends XDRuntimeException {
+public class ZooKeeperAccessException extends DirtException {
 
 	public ZooKeeperAccessException(String message, Throwable cause) {
 		super(message, cause);

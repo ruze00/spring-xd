@@ -24,6 +24,7 @@ import static org.hamcrest.Matchers.hasProperty;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
+import static org.junit.Assert.fail;
 
 import java.util.Arrays;
 import java.util.List;
@@ -86,7 +87,8 @@ abstract public class PartitionCapableBusTests extends BrokerBusTests {
 		Properties properties = new Properties();
 		properties.put("partitionKeyExpression", "payload");
 		properties.put("partitionSelectorExpression", "hashCode()");
-		properties.put("partitionCount", "3");
+		properties.put(BusProperties.NEXT_MODULE_COUNT, "3");
+		properties.put(BusProperties.NEXT_MODULE_CONCURRENCY, "2");
 
 		DirectChannel output = new DirectChannel();
 		output.setBeanName("test.output");
@@ -186,7 +188,8 @@ abstract public class PartitionCapableBusTests extends BrokerBusTests {
 		Properties properties = new Properties();
 		properties.put("partitionKeyExtractorClass", "org.springframework.xd.dirt.integration.bus.PartitionTestSupport");
 		properties.put("partitionSelectorClass", "org.springframework.xd.dirt.integration.bus.PartitionTestSupport");
-		properties.put("partitionCount", "3");
+		properties.put(BusProperties.NEXT_MODULE_COUNT, "3");
+		properties.put(BusProperties.NEXT_MODULE_CONCURRENCY, "2");
 
 		DirectChannel output = new DirectChannel();
 		output.setBeanName("test.output");
@@ -242,6 +245,26 @@ abstract public class PartitionCapableBusTests extends BrokerBusTests {
 
 		bus.unbindConsumers("partJ.0");
 		bus.unbindProducers("partJ.0");
+	}
+
+
+	@Test
+	public void testPartitioningWithSingleReceiver() throws Exception {
+		MessageBus bus = getMessageBus();
+		Properties properties = new Properties();
+		properties.put("partitionKeyExtractorClass", "org.springframework.xd.dirt.integration.bus.PartitionTestSupport");
+		properties.put("partitionSelectorClass", "org.springframework.xd.dirt.integration.bus.PartitionTestSupport");
+		try {
+			DirectChannel output = new DirectChannel();
+			output.setBeanName("test.output");
+			bus.bindProducer("partK.0", output, properties);
+			fail();
+		}
+		catch (IllegalArgumentException e) {
+			assertThat(e.getMessage(), Matchers.equalTo(bus.getClass().getSimpleName().replace("Test", "")
+							+ " requires partitioned data to be sent to a module having 'count' > 1 for 'partK.0'"));
+		}
+
 	}
 
 	/**

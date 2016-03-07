@@ -18,11 +18,8 @@ package org.springframework.xd.dirt.rest;
 
 import static org.mockito.Mockito.mock;
 
-import org.springframework.batch.admin.service.JdbcSearchableJobExecutionDao;
 import org.springframework.batch.admin.service.JdbcSearchableJobInstanceDao;
 import org.springframework.batch.admin.service.JdbcSearchableStepExecutionDao;
-import org.springframework.batch.admin.service.JobService;
-import org.springframework.batch.admin.service.SearchableJobExecutionDao;
 import org.springframework.batch.admin.service.SearchableJobInstanceDao;
 import org.springframework.batch.admin.service.SearchableStepExecutionDao;
 import org.springframework.batch.core.configuration.JobRegistry;
@@ -45,11 +42,12 @@ import org.springframework.xd.analytics.metrics.core.RichGaugeRepository;
 import org.springframework.xd.dirt.container.store.ContainerRepository;
 import org.springframework.xd.dirt.integration.bus.MessageBus;
 import org.springframework.xd.dirt.integration.bus.local.LocalMessageBus;
-import org.springframework.xd.dirt.module.ModuleDefinitionService;
+import org.springframework.xd.dirt.job.dao.XdJdbcSearchableJobExecutionDao;
 import org.springframework.xd.dirt.module.ModuleDependencyRepository;
 import org.springframework.xd.dirt.module.WritableModuleRegistry;
 import org.springframework.xd.dirt.module.store.ModuleMetadataRepository;
 import org.springframework.xd.dirt.module.store.ZooKeeperModuleDependencyRepository;
+import org.springframework.xd.dirt.module.support.ModuleDefinitionService;
 import org.springframework.xd.dirt.plugins.job.DistributedJobLocator;
 import org.springframework.xd.dirt.plugins.job.DistributedJobService;
 import org.springframework.xd.dirt.server.admin.deployment.DeploymentHandler;
@@ -211,7 +209,7 @@ public class Dependencies {
 	}
 
 	@Bean
-	public JobService jobService() {
+	public DistributedJobService jobService() {
 		return mock(DistributedJobService.class);
 	}
 
@@ -221,8 +219,8 @@ public class Dependencies {
 	}
 
 	@Bean
-	public SearchableJobExecutionDao searchableJobExecutionDao() {
-		return mock(JdbcSearchableJobExecutionDao.class);
+	public XdJdbcSearchableJobExecutionDao searchableJobExecutionDao() {
+		return mock(XdJdbcSearchableJobExecutionDao.class);
 	}
 
 	@Bean
@@ -260,8 +258,9 @@ public class Dependencies {
 		return new DeploymentMessagePublisher() {
 
 			DeploymentMessageConsumer consumer = new DeploymentMessageConsumer();
+
 			@Override
-			public void publishDeploymentMessage(DeploymentMessage deploymentMessage) {
+			public void publish(DeploymentMessage deploymentMessage) {
 				try {
 					consumer.consumeMessage(deploymentMessage, streamDeployer(), jobDeployer());
 				}
@@ -269,12 +268,22 @@ public class Dependencies {
 					throw new RuntimeException(e);
 				}
 			}
+
+			@Override
+			public void poll(DeploymentMessage message) {
+				// todo: the "real" implementation of poll waits until
+				// the deployment message has been processed; this
+				// should be revisited to see if/how the same behavior
+				// can be mimicked
+				publish(message);
+			}
 		};
 	}
 
 	@Bean
 	public DeploymentHandler deploymentHandler() {
 		return new DeploymentHandler() {
+
 			@Override
 			public void deploy(String deploymentUnitName) throws Exception {
 

@@ -17,7 +17,7 @@
 package org.springframework.xd.dirt.stream;
 
 
-import static org.springframework.xd.dirt.stream.dsl.XDDSLMessages.*;
+import static org.springframework.xd.dirt.stream.dsl.XDDSLMessages.NAMED_CHANNELS_UNSUPPORTED_HERE;
 
 import java.util.ArrayList;
 import java.util.Deque;
@@ -48,6 +48,9 @@ import org.springframework.xd.module.ModuleType;
 import org.springframework.xd.module.core.CompositeModule;
 import org.springframework.xd.module.options.ModuleOptionsMetadata;
 import org.springframework.xd.module.options.ModuleOptionsMetadataResolver;
+import org.springframework.xd.store.AbstractRepository;
+
+import com.google.common.collect.Iterables;
 
 /**
  * Parser to convert a DSL string for a stream into a list of
@@ -111,15 +114,27 @@ public class XDStreamParser implements XDParser {
 		this(null, moduleRegistry, moduleOptionsMetadataResolver);
 	}
 
-	/**
-	 * {@inheritDoc}
-	 */
 	@Override
 	public List<ModuleDescriptor> parse(String name, String config, ParsingContext parsingContext) {
 
 		StreamConfigParser parser = new StreamConfigParser(repository);
 		StreamNode stream = parser.parse(name, config);
-		Deque<ModuleDescriptor.Builder> builders = new LinkedList<ModuleDescriptor.Builder>();
+		return buildModuleDescriptors(name, config, parsingContext, stream, null);
+	}
+
+	/**
+	 * Build a list of ModuleDescriptors out of a parsed StreamNode. If an errorAccumulator
+	 * is passed then the method will not exit on the first exception that occurs, instead
+	 * it will record the problems in the accumulator and attempt to continue processing.
+	 * @param name the name of the definition unit
+	 * @param rawDSL the raw DSL text of the definition
+	 * @param parsingContext the context in which parsing happens
+	 * @param stream the AST construct representing the definition
+	 * @param errorAccumulator accumulates exceptions that occur during validation
+	 */
+	private List<ModuleDescriptor> buildModuleDescriptors(String name, String rawDSL, ParsingContext parsingContext,
+			StreamNode stream, List<Exception> errorAccumulator) {
+		Deque<ModuleDescriptor.Builder> builders = new LinkedList<>();
 
 		List<ModuleNode> moduleNodes = stream.getModuleNodes();
 		for (int m = moduleNodes.size() - 1; m >= 0; m--) {
@@ -145,7 +160,7 @@ public class XDStreamParser implements XDParser {
 				builders.getLast().setSourceChannelName(sourceChannel.getChannelName());
 			}
 			else {
-				throw new StreamDefinitionException(config, sourceChannel.getStartPos(),
+				throw new StreamDefinitionException(rawDSL, sourceChannel.getStartPos(),
 						NAMED_CHANNELS_UNSUPPORTED_HERE);
 			}
 		}
@@ -156,7 +171,7 @@ public class XDStreamParser implements XDParser {
 				builders.getFirst().setSinkChannelName(sinkChannel.getChannelName());
 			}
 			else {
-				throw new StreamDefinitionException(config, sinkChannel.getChannelNode().getStartPos(),
+				throw new StreamDefinitionException(rawDSL, sinkChannel.getChannelNode().getStartPos(),
 						NAMED_CHANNELS_UNSUPPORTED_HERE);
 			}
 		}
@@ -166,19 +181,44 @@ public class XDStreamParser implements XDParser {
 		// And while we're at it (and type is known), validate module name and options
 		List<ModuleDescriptor> result = new ArrayList<ModuleDescriptor>(builders.size());
 		for (ModuleDescriptor.Builder builder : builders) {
-			builder.setType(determineType(builder, builders.size() - 1, parsingContext));
-
-			// definition is guaranteed to be non-null here
-			ModuleDefinition moduleDefinition = moduleRegistry.findDefinition(builder.getModuleName(), builder.getType());
-			builder.setModuleDefinition(moduleDefinition);
-			ModuleOptionsMetadata optionsMetadata = moduleOptionsMetadataResolver.resolve(moduleDefinition);
-			if (parsingContext.shouldBindAndValidate()) {
-				try {
-					optionsMetadata.interpolate(builder.getParameters());
+			ModuleType moduleType;
+			try {
+				moduleType = determineType(builder, builders.size() - 1, parsingContext);
+			}
+			catch (NoSuchModuleException nsme) {
+				if (errorAccumulator != null) {
+					errorAccumulator.add(nsme);
+					// 'processor' below effectively indicates 'unknown' - a caller passing an
+					// error accumulator should be aware that this can happen (the accumulator
+					// will contain the exception that indicates it did)
+					moduleType = ModuleType.processor;
 				}
-				catch (BindException e) {
-					throw ModuleConfigurationException.fromBindException(builder.getModuleName(),
-							builder.getType(), e);
+				else {
+					throw nsme;
+				}
+			}
+			builder.setType(moduleType);
+
+			ModuleDefinition moduleDefinition = moduleRegistry.findDefinition(builder.getModuleName(),
+					builder.getType());
+			if (moduleDefinition != null) {
+				builder.setModuleDefinition(moduleDefinition);
+				ModuleOptionsMetadata optionsMetadata = moduleOptionsMetadataResolver.resolve(moduleDefinition);
+				if (parsingContext.shouldBindAndValidate()) {
+					try {
+						optionsMetadata.interpolate(builder.getParameters());
+					}
+					catch (BindException e) {
+						ModuleConfigurationException mce = ModuleConfigurationException.fromBindException(
+								builder.getModuleName(),
+								builder.getType(), e);
+						if (errorAccumulator != null) {
+							errorAccumulator.add(mce);
+						}
+						else {
+							throw mce;
+						}
+					}
 				}
 			}
 
@@ -263,7 +303,9 @@ public class XDStreamParser implements XDParser {
 	 */
 	private ModuleDescriptor buildModuleDescriptor(ModuleDescriptor.Builder builder) {
 		ModuleDefinition def = moduleRegistry.findDefinition(builder.getModuleName(), builder.getType());
-		if (def.isComposed()) {
+		// null if working in 'recovery' mode where something has gone wrong already, it has
+		// been logged but continued processing is attempted to uncover any other issues.
+		if (def != null && def.isComposed()) {
 			String dsl = ((CompositeModuleDefinition) def).getDslDefinition();
 			List<ModuleDescriptor> children = parse(def.getName(), dsl, ParsingContext.module);
 
@@ -320,6 +362,107 @@ public class XDStreamParser implements XDParser {
 			}
 		}
 		throw new NoSuchModuleException(moduleName, candidates);
+	}
+
+	/**
+	 * A wrapper around the canonical parser that supports multiline "document" parsing.
+	 *
+	 * <p>While XDStreamParser parses a single definition, this class is able to parse multiple, reporting
+	 * errors or accepting constructs like taps against definitions that appear earlier in the document (without
+	 * actually saving them in the main repository).</p>
+	 *
+	 * @author Eric Bottard
+	 */
+	public static class MultiLineDocumentParser {
+
+		private final XDStreamParser delegate;
+
+		public MultiLineDocumentParser(XDStreamParser delegate) {
+			this.delegate = delegate;
+		}
+
+		public DocumentParseResult parse(String[] document) {
+			DocumentParseResult result = new DocumentParseResult(document.length);
+			CrudRepository<BaseDefinition, String> transientRepository = new TransientDefinitionRepository();
+			StreamConfigParser parser = new StreamConfigParser(transientRepository);
+			int line = 1;
+			for (String nameAndDefinitionPair : document) {
+				try {
+					StreamNode stream = parser.parse(nameAndDefinitionPair);
+					String streamName = stream.getStreamName();
+					if (streamName == null) {
+						// Give the stream a placeholder name as none was supplied. Someone
+						// processing the parse result should know this can happen.
+						streamName = "UNKNOWN_" + line;
+					}
+					List<Exception> errorAccumulator = new ArrayList<Exception>();
+					List<ModuleDescriptor> moduleDescriptors = delegate.buildModuleDescriptors(streamName,
+							nameAndDefinitionPair, ParsingContext.partial_stream, stream, errorAccumulator);
+					BaseDefinition streamDefinition = new StreamDefinition(streamName, nameAndDefinitionPair);
+					transientRepository.save(streamDefinition);
+					result.success(moduleDescriptors, errorAccumulator);
+				}
+				catch (Exception e) {
+					result.failure(e);
+				}
+				line++;
+			}
+			return result;
+		}
+
+
+		/**
+		 * A throwaway repository that is used during multi-definition parsing. "Sees" definitions that are
+		 * known to the real {@link #repository} and stores new definitions in an in-memory map.
+		 *
+		 * @author Eric Bottard
+		 */
+		private class TransientDefinitionRepository
+				extends AbstractRepository<BaseDefinition, String>
+				implements CrudRepository<BaseDefinition, String> {
+
+			private Map<String, BaseDefinition> store = new HashMap<>();
+
+			@Override
+			public <S extends BaseDefinition> S save(S entity) {
+				store.put(entity.getName(), entity);
+				return entity;
+			}
+
+			@Override
+			public BaseDefinition findOne(String s) {
+				BaseDefinition inMemory = store.get(s);
+				return inMemory != null ? inMemory : delegate.repository.findOne(s);
+			}
+
+			@Override
+			public Iterable<BaseDefinition> findAll() {
+				return Iterables.concat(delegate.repository.findAll(), store.values());
+			}
+
+			@Override
+			public long count() {
+				return store.size() + delegate.repository.count();
+			}
+
+			@Override
+			public void delete(String s) {
+				store.remove(s);
+				delegate.repository.delete(s);
+			}
+
+			@Override
+			public void delete(BaseDefinition entity) {
+				store.remove(entity.getName());
+				delegate.repository.delete(entity.getName());
+			}
+
+			@Override
+			public void deleteAll() {
+				store.clear();
+				delegate.repository.deleteAll();
+			}
+		}
 	}
 
 }

@@ -67,11 +67,6 @@ public interface BusProperties {
 	public static final String COUNT = "count";
 
 	/**
-	 * The partition count.
-	 */
-	public static final String PARTITION_COUNT = "partitionCount";
-
-	/**
 	 * The consumer's partition index.
 	 */
 	public static final String PARTITION_INDEX = "partitionIndex";
@@ -135,5 +130,15 @@ public interface BusProperties {
 	 * Compression enabled.
 	 */
 	public static final String COMPRESS = "compress";
+
+	/**
+	 * Durable pub/sub consumer.
+	 */
+	public static final String DURABLE = "durableSubscription";
+
+	/**
+	 * Minimum partition count, if the transport supports partitioning natively (e.g. Kafka)
+	 */
+	public static final String MIN_PARTITION_COUNT = "minPartitionCount";
 
 }

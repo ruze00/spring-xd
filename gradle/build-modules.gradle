@@ -14,7 +14,8 @@ configure(moduleProjects) { moduleProject ->
     // contain java code, so reset everything (prevents creation of
     // the 'build' directory, etc)
     apply plugin: 'spring-boot'
-
+    startScripts.enabled = false
+    distZip.enabled = false
     bootRepackage {
         enabled = false
     }
@@ -86,13 +87,6 @@ project('modules.source.mail') {
     }
 }
 
-project('modules.sink.redis') {
-    dependencies {
-        runtime project(":spring-xd-extension-redis")
-    }
-}
-
-
 project('modules.source.file') {
     dependencies { runtime	"org.springframework.integration:spring-integration-file" }
 }
@@ -106,7 +100,7 @@ project('modules.source.http') {
 }
 
 project('modules.source.jdbc') {
-    dependencies { runtime project(":spring-xd-extension-jdbc") }
+    dependencies { runtime(project(":spring-xd-extension-jdbc")) { exclude group: 'com.google.guava' } }
 }
 
 project('modules.source.tcp') {
@@ -205,6 +199,10 @@ project('modules.source.sftp') {
     dependencies { runtime      "org.springframework.integration:spring-integration-sftp" }
 }
 
+project('modules.source.ftp') {
+    dependencies { runtime      "org.springframework.integration:spring-integration-ftp" }
+}
+
 project('modules.source.rabbit') {
     dependencies { runtime "org.springframework.integration:spring-integration-amqp" }
 }
@@ -230,7 +228,7 @@ project('modules.processor.aggregator') {
     dependencies {
         // These are for the message stores
         runtime	("org.springframework.integration:spring-integration-redis") { exclude group: 'org.slf4j' }
-        runtime	("org.springframework.integration:spring-integration-jdbc")
+        runtime	("org.springframework.integration:spring-integration-jdbc") { exclude group: 'com.google.guava' }
     }
 }
 
@@ -260,6 +258,18 @@ project('modules.processor.filter') {
 
 // ================ M O D U L E S : S I N K S ==========================
 
+project('modules.sink.redis') {
+    dependencies {
+        runtime project(":spring-xd-extension-redis")
+    }
+}
+
+project('modules.sink.ftp') {
+    dependencies {
+        dependencies { runtime "org.springframework.integration:spring-integration-ftp" }
+    }
+}
+
 project('modules.sink.tcp') {
     dependencies { runtime project(":spring-xd-extension-tcp") }
 }
@@ -274,7 +284,11 @@ project('modules.sink.file') {
 }
 
 project('modules.sink.jdbc') {
-    dependencies { runtime project(":spring-xd-extension-jdbc") }
+    dependencies { runtime(project(":spring-xd-extension-jdbc")) { exclude group: 'com.google.guava' } }
+}
+
+project('modules.sink.gpfdist') {
+    dependencies { runtime(project(":spring-xd-extension-gpfdist")) { exclude group: 'com.google.guava' } }
 }
 
 project('modules.sink.mail') {
@@ -347,18 +361,24 @@ project('modules.sink.rabbit') {
     dependencies { runtime "org.springframework.integration:spring-integration-amqp" }
 }
 
+project('modules.sink.cassandra') {
+    dependencies { runtime (project(":spring-xd-extension-cassandra")) }
+}
+
 
 // ================ M O D U L E S : J O B S ============================
 
 project('modules.job.sparkapp') {
-   dependencies {
-	runtime(project(":spring-xd-extension-spark"))
+    dependencies {
+        runtime(project(":spring-xd-extension-spark"))
+        runtime("org.slf4j:slf4j-log4j12")
+        runtime("log4j:log4j")
    }
 }
 
 project('modules.job.filejdbc') {
     dependencies {
-        runtime(project(":spring-xd-extension-jdbc"))
+        runtime(project(":spring-xd-extension-jdbc")) { exclude group: 'com.google.guava' }
     }
 }
 
@@ -370,13 +390,14 @@ project('modules.job.hdfsmongodb') {
 
 project('modules.job.hdfsjdbc') {
     dependencies {
-        runtime(project(":spring-xd-extension-jdbc"))
+        runtime(project(":spring-xd-extension-jdbc")) { exclude group: 'com.google.guava' }
     }
 }
 
 project('modules.job.jdbchdfs') {
     dependencies {
-        runtime(project(":spring-xd-extension-jdbc"))
+        runtime(project(":spring-xd-extension-jdbc")) { exclude group: 'com.google.guava' }
+        runtime(project(":spring-xd-extension-batch"))
     }
 }
 
@@ -393,8 +414,31 @@ project('modules.job.timestampfile') {
 }
 
 project('modules.job.sqoop') {
+    configurations.runtime {
+        resolutionStrategy {
+            eachDependency { DependencyResolveDetails details ->
+                //Force requested version of Snappy so we can copy it to the lib directory
+                if (details.requested.group == 'org.xerial.snappy' && details.requested.name == 'snappy-java') {
+                    details.useVersion requested.version
+                }
+            }
+        }
+    }
     dependencies {
         runtime(project(":spring-xd-extension-sqoop"))
+        runtime('org.xerial.snappy:snappy-java:1.0.5')
+        runtime('org.apache.avro:avro-mapred:1.7.6:hadoop2') {
+            exclude group: 'org.apache.avro', module: 'avro-ipc'
+            exclude group: 'com.google.guava', module: 'guava'
+        }
+    }
+    copyLibs.dependsOn {
+        copyExtraLibs
+    }
+    task copyExtraLibs(type: Copy) {
+        from configurations.runtime
+        into project.file('lib/')
+        include 'snappy-java-*'
     }
 }
 

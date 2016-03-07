@@ -22,8 +22,8 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.commons.lang.ClassUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.integration.support.MessageBuilder;
 import org.springframework.messaging.Message;
@@ -46,7 +46,7 @@ import org.springframework.xd.dirt.integration.bus.StringConvertingContentTypeRe
  */
 public abstract class AbstractFromMessageConverter extends AbstractMessageConverter {
 
-	protected Log logger = LogFactory.getLog(this.getClass());
+	protected Logger logger = LoggerFactory.getLogger(this.getClass());
 
 	protected final List<MimeType> targetMimeTypes;
 
@@ -182,14 +182,6 @@ public abstract class AbstractFromMessageConverter extends AbstractMessageConver
 	}
 
 	/**
-	 * Not supported by default
-	 */
-	@Override
-	public Object convertToInternal(Object payload, MessageHeaders headers) {
-		throw new UnsupportedOperationException("'convertTo' not supported");
-	}
-
-	/**
 	 * Convenience method to construct a converted message
 	 *
 	 * @param payload the converted payload
@@ -198,9 +190,8 @@ public abstract class AbstractFromMessageConverter extends AbstractMessageConver
 	 * @return the converted message
 	 */
 	protected final Message<?> buildConvertedMessage(Object payload, MessageHeaders headers, MimeType contentType) {
-		return MessageBuilder.withPayload(payload).copyHeaders(headers)
-				.copyHeaders(
-						Collections.singletonMap(MessageHeaders.CONTENT_TYPE,
-								contentType)).build();
+		return MessageBuilder.withPayload(payload).copyHeaders(headers).copyHeaders(
+				Collections.singletonMap(MessageHeaders.CONTENT_TYPE,
+						contentType)).build();
 	}
 }

@@ -26,9 +26,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.commons.lang.ClassUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.DisposableBean;
@@ -65,7 +64,7 @@ import org.springframework.xd.module.options.PassthruModuleOptionsMetadata;
  */
 public abstract class SimpleModule extends AbstractModule {
 
-	private final Log logger = LogFactory.getLog(this.getClass());
+	private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
 	private ConfigurableApplicationContext context;
 
@@ -264,7 +263,7 @@ public abstract class SimpleModule extends AbstractModule {
 				throw new IllegalStateException(e);
 			}
 		}
-		if (ClassUtils.isAssignable(classLoader.getClass(), Closeable.class)) {
+		if (classLoader instanceof Closeable) {
 			try {
 				((Closeable) classLoader).close();
 			}

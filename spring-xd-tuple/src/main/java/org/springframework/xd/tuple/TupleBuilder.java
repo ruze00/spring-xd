@@ -23,10 +23,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.core.convert.support.ConfigurableConversionService;
+import org.springframework.util.AlternativeJdkIdGenerator;
 import org.springframework.util.Assert;
+import org.springframework.util.IdGenerator;
 
 /**
  * Builder class to create Tuple instances.
@@ -60,10 +63,7 @@ public class TupleBuilder {
 
 	private static Converter<String, Tuple> stringToTupleConverter = new JsonStringToTupleConverter();
 
-	private DateFormat dateFormat = new SimpleDateFormat(DEFAULT_DATE_PATTERN);
-	{
-		dateFormat.setLenient(false);
-	}
+	private static final IdGenerator defaultIdGenerator = new AlternativeJdkIdGenerator();
 
 	static {
 		defaultConversionService = new DefaultTupleConversionService();
@@ -111,6 +111,20 @@ public class TupleBuilder {
 
 	public TupleBuilder put(String k1, Object v1) {
 		addEntry(k1, v1);
+		return this;
+	}
+
+	/**
+	 * Add all names and values of the tuple to the built tuple.
+	 * @param tuple names and value to add to the tuple being built
+	 * @return builder to continue creating a new tuple instance
+	 */
+	public TupleBuilder putAll(Tuple tuple) {
+		for (int i = 0; i < tuple.size(); i++) {
+			Object value = tuple.getValues().get(i);
+			String name = tuple.getFieldNames().get(i);
+			addEntry(name, value);
+		}
 		return this;
 	}
 

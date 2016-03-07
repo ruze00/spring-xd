@@ -16,22 +16,22 @@
 
 package org.springframework.xd.dirt.analytics;
 
-import org.springframework.xd.dirt.XDRuntimeException;
+import org.springframework.xd.dirt.DirtException;
 
 /**
  * Thrown when trying to access a named metric that does not exist.
- * 
+ *
  * @author Eric Bottard
  */
 @SuppressWarnings("serial")
-public class NoSuchMetricException extends XDRuntimeException {
+public class NoSuchMetricException extends DirtException {
 
 	private final String offendingName;
 
 	/**
 	 * Construct a new exception. Message can contain {@link String#format(String, Object...)} placeholders and will be
 	 * formatted with the offending name.
-	 * 
+	 *
 	 */
 	public NoSuchMetricException(String offendingName, String message) {
 		super(String.format(message, offendingName));

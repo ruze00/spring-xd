@@ -138,4 +138,27 @@ public interface MessageBus {
 	 */
 	MessageChannel bindDynamicPubSubProducer(String name, Properties properties);
 
+	/**
+	 * Return true if the bus supports the capability.
+	 * @param capability the capability.
+	 * @return true if the capability is supported.
+	 */
+	boolean isCapable(Capability capability);
+
+	public enum Capability {
+
+		/**
+		 * When a bus supports durable subscriptions to a pub/sub channel, the stream
+		 * name will be included in the consumer name.
+		 */
+		DURABLE_PUBSUB,
+
+		/**
+		 * When a bus supports partitioning natively, then a partitioning strategy can
+		 * be provided for any kind of producer, regardless on the count of downstream
+		 * consumers
+		 */
+		NATIVE_PARTITIONING
+	}
+
 }

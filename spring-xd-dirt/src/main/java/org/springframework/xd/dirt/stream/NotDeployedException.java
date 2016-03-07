@@ -16,21 +16,19 @@
 
 package org.springframework.xd.dirt.stream;
 
-import org.springframework.xd.dirt.XDRuntimeException;
-
 /**
  * Thrown when a definition was assumed to be deployed when it actually was not.
- * 
+ *
  * @author Eric Bottard
  */
 @SuppressWarnings("serial")
-public class NotDeployedException extends XDRuntimeException {
+public class NotDeployedException extends StreamException {
 
 	private final String offendingName;
 
 	/**
 	 * Create a new exception.
-	 * 
+	 *
 	 * @param offendingName name of the definition that wasn't found
 	 * @param message Exception message. Can use {@link String#format(String, Object...)} syntax to include the
 	 *        offendingName

@@ -19,28 +19,23 @@ package org.springframework.xd.dirt.plugins.job;
 import static org.junit.Assert.assertEquals;
 
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
 
 import org.junit.Rule;
 
 import org.springframework.expression.spel.support.StandardEvaluationContext;
+import org.springframework.integration.codec.Codec;
+import org.springframework.integration.codec.kryo.PojoCodec;
 import org.springframework.integration.test.util.TestUtils;
 import org.springframework.xd.dirt.integration.bus.MessageBus;
 import org.springframework.xd.dirt.integration.bus.redis.RedisTestMessageBus;
-import org.springframework.xd.dirt.integration.bus.serializer.AbstractCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.CompositeCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.MultiTypeCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.kryo.PojoCodec;
-import org.springframework.xd.dirt.integration.bus.serializer.kryo.TupleCodec;
 import org.springframework.xd.dirt.integration.redis.RedisMessageBus;
 import org.springframework.xd.test.redis.RedisTestSupport;
-import org.springframework.xd.tuple.Tuple;
+import org.springframework.xd.tuple.serializer.kryo.TupleKryoRegistrar;
 
 
 /**
- * 
  * @author Gary Russell
+ * @author David Turanski*
  */
 public class RedisJobPluginTests extends JobPluginTests {
 
@@ -73,11 +68,9 @@ public class RedisJobPluginTests extends JobPluginTests {
 		}
 	}
 
-	@SuppressWarnings({ "unchecked", "rawtypes" })
-	protected MultiTypeCodec<Object> getCodec() {
-		Map<Class<?>, AbstractCodec<?>> codecs = new HashMap<Class<?>, AbstractCodec<?>>();
-		codecs.put(Tuple.class, new TupleCodec());
-		return new CompositeCodec(codecs, new PojoCodec());
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	protected Codec getCodec() {
+		return new PojoCodec(new TupleKryoRegistrar());
 	}
 
 }

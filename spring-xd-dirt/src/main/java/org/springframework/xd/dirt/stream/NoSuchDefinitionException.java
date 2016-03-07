@@ -16,21 +16,19 @@
 
 package org.springframework.xd.dirt.stream;
 
-import org.springframework.xd.dirt.XDRuntimeException;
-
 /**
  * Exception which is raised when a named resource definition cannot be found.
- * 
+ *
  * @author Luke Taylor
  */
 @SuppressWarnings("serial")
-public class NoSuchDefinitionException extends XDRuntimeException {
+public class NoSuchDefinitionException extends StreamException {
 
 	private final String offendingName;
 
 	/**
 	 * Create a new exception.
-	 * 
+	 *
 	 * @param offendingName name of the definition that wasn't found
 	 * @param message Exception message. Can use {@link String#format(String, Object...)} syntax to include the
 	 *        offendingName

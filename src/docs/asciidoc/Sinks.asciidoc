@@ -1,91 +1,161 @@
-[[sinks]]
-ifndef::env-github[]
-== Sinks
-endif::[]
 
-=== Introduction
-In this section we will show some variations on output sinks.  As a prerequisite start the XD Container
+// Empty line above needed after the list from previous file
+[[sinks]]
+== Sinks
+
+This section describes the _sink_ modules included with Spring XD. A sink terminates a stream to persist data or push it to an external consumer. To run the examples shown here, start the XD Container
 as instructed in the xref:Getting-Started#getting-started[Getting Started] page.
 
-The Sinks covered are
-
-* <<log, Log>>
-
-* <<file-sink, File>>
-
-* <<hadoop-hdfs, HDFS>>
-
-* <<hdfs-dataset-avroparquet, HDFS Dataset>>
-
-* <<jdbc, JDBC>>
-
-* <<tcp-sink, TCP>>
-
-* <<shell-sink, Shell Command>>
-
-* <<mongo, Mongo>>
-
-* <<mail, Mail>>
-
-* <<rabbitmq, RabbitMQ>>
-
-* <<gemfire-server, GemFire Server>>
-
-* <<splunk-server, Splunk Server>>
-
-* <<mqtt-sink, MQTT>>
+The available sinks are
 
 * <<dynamic-router, Dynamic Router>>
-
-* <<null-sink, Null Sink>>
-
-* <<redis, Redis>>
-
+* <<file-sink, File>>
+* <<ftp-sink, FTP>>
+* <<gemfire-server, GemFire Server>>
+* <<gpfdist, GPFDIST>>
+* <<cassandra, Cassandra>>
+* <<hadoop-hdfs, HDFS>>
+* <<hdfs-dataset-avroparquet, HDFS Dataset>>
+* <<jdbc, JDBC>>
 * <<kafka-sink, Kafka>>
+* <<log, Log>>
+* <<mail, Mail>>
+* <<mongo, Mongo>>
+* <<mqtt-sink, MQTT>>
+* <<null-sink, Null Sink>>
+* <<rabbitmq, RabbitMQ>>
+* <<redis, Redis>>
+* <<shell-sink, Shell Command>>
+* <<splunk-server, Splunk Server>>
+* <<tcp-sink, TCP>>
+
+
+Additionally, Spring XD provides a number of xref:Counters-and-Gauges#counters-and-gauges[counters and gauges], which are specialized sinks useful for real time analytics.
 
 See the section xref:Creating-a-Sink-Module#creating-a-sink-module[Creating a Sink Module] for information on how to create sink modules using other Spring Integration Adapters.
 
-[[log]]
-=== Log
+[[dynamic-router]]
+=== Dynamic Router (`router`)
 
-Probably the simplest option for a sink is just to log the data. The `log` sink uses the application logger to output the data for inspection. The log level is set to `WARN` and the logger name is created from the stream name. To create a stream using a `log` sink you would use a command like
+The Dynamic Router support allows for routing Spring XD messages to *named channels* based on the evaluation of SpEL expressions or Groovy Scripts.
 
-  xd:> stream create --name mylogstream --definition "http --port=8000 | log" --deploy
+==== SpEL-based Routing
 
-You can then try adding some data. We've used the `http` source on port 8000 here, so run the following command to send a message
+In the following example, 2 streams are created that listen for message on the *foo* and the *bar* channel. Furthermore, we create a stream that receives messages via HTTP and then delegates the received messages to a router:
 
-  xd:> http post --target http://localhost:8000 --data "hello"
+----
+xd:>stream create f --definition "queue:foo > transform --expression=payload+'-foo' | log" --deploy
+Created new stream 'f'
 
-and you should see the following output in the XD container console.
+xd:>stream create b --definition "queue:bar > transform --expression=payload+'-bar' | log" --deploy
+Created new stream 'b'
 
-  13/06/07 16:12:18 INFO sink.mylogstream: hello
+xd:>stream create r --definition "http | router --expression=payload.contains('a')?'queue:foo':'queue:bar'" --deploy
+Created new stream 'r'
+----
 
-//^sink.log
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.log' TAG
+Now we make 2 requests to the HTTP source:
+
+----
+xd:>http post --data "a"
+> POST (text/plain;Charset=UTF-8) http://localhost:9000 a
+> 200 OK
+
+xd:>http post --data "b"
+> POST (text/plain;Charset=UTF-8) http://localhost:9000 b
+> 200 OK
+----
+
+In the server log you should see the following output:
+
+----
+11:54:19,868  WARN ThreadPoolTaskScheduler-1 sink.f:145 - a-foo
+11:54:25,669  WARN ThreadPoolTaskScheduler-1 sink.b:145 - b-bar
+----
+
+For more information, please also consult the Spring Integration Reference manual: http://static.springsource.org/spring-integration/reference/html/messaging-routing-chapter.html#router-namespace particularly the section "Routers and the Spring Expression Language (SpEL)".
+
+==== Groovy-based Routing
+
+Instead of SpEL expressions, Groovy scripts can also be used. Let's create a Groovy script in the file system at "/my/path/router.groovy"
+
+[source,groovy]
+----
+println("Groovy processing payload '" + payload +"'");
+if (payload.contains('a')) {
+	return ":foo"
+}
+else {
+	return ":bar"
+}
+----
+
+Now we create the following streams:
+
+----
+xd:>stream create f --definition ":foo > transform --expression=payload+'-foo' | log" --deploy
+Created new stream 'f'
+
+xd:>stream create b --definition ":bar > transform --expression=payload+'-bar' | log" --deploy
+Created new stream 'b'
+
+xd:>stream create g --definition "http | router --script='file:/my/path/router.groovy'" --deploy
+----
+
+Now post some data to the HTTP source:
+
+----
+xd:>http post --data "a"
+> POST (text/plain;Charset=UTF-8) http://localhost:9000 a
+> 200 OK
+
+xd:>http post --data "b"
+> POST (text/plain;Charset=UTF-8) http://localhost:9000 b
+> 200 OK
+----
+
+In the server log you should see the following output:
+
+----
+Groovy processing payload 'a'
+11:29:27,274  WARN ThreadPoolTaskScheduler-1 sink.f:145 - a-foo
+Groovy processing payload 'b'
+11:34:09,797  WARN ThreadPoolTaskScheduler-1 sink.b:145 - b-bar
+----
+
+[NOTE]
+===============================
+You can also use Groovy scripts located on your classpath by specifying:
+----
+--script='org/my/package/router.groovy'
+----
+===============================
+
+If you want to pass variable values to your script, you can statically bind values using the _variables_ option or optionally pass the path to a properties file containing the bindings using the _propertiesLocation_ option. All properties in the file will be made available to the script as variables. You may specify both _variables_ and _propertiesLocation_, in which case any duplicate values provided as _variables_ override values provided in _propertiesLocation_. Note that _payload_ and _headers_ are implicitly bound to give you access to the data contained in a message.
+
+For more information, see the Spring Integration Reference manual: "Groovy support"
+http://static.springsource.org/spring-integration/reference/html/messaging-endpoints-chapter.html#groovy
+
+==== Options
+
+//^sink.router
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.router' TAG
 // THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$log$$** $$sink$$ has the following options:
+The **$$router$$** $$sink$$ has the following options:
 
-$$expression$$:: $$the expression to be evaluated for the log content; use '#root' to log the full message$$ *($$String$$, default: `payload`)*
-$$level$$:: $$the log level$$ *($$String$$, default: `INFO`)*
-$$name$$:: $$the name of the log category to log to (will be prefixed by 'xd.sink.')$$ *($$String$$, default: `<stream name>`)*
-//$sink.log
+$$expression$$:: $$a SpEL expression used to transform messages$$ *($$String$$, default: `payload.toString()`)*
+$$propertiesLocation$$:: $$the path of a properties file containing custom script variable bindings$$ *($$String$$, no default)*
+$$refreshDelay$$:: $$how often to check (in milliseconds) whether the script has changed; -1 for never$$ *($$long$$, default: `60000`)*
+$$script$$:: $$reference to a script used to process messages$$ *($$String$$, no default)*
+$$variables$$:: $$variable bindings as a comma delimited string of name-value pairs, e.g., 'foo=bar,baz=car'$$ *($$String$$, no default)*
+//$sink.router
 
-Here are some examples explaining the above options:
-
-The logger name is the sink name prefixed with the string `xd.sink.`. The sink name is the same as the stream name by default, but you can set it by passing the `--name` parameter 
-
-  xd:> stream create --name myotherlogstream --definition "http --port=8001 | log --name=mylogger" --deploy
-
-The log level is `INFO` by default; this can be changed with the `--level` property (`FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, or `TRACE`)
-
-  xd:> stream create --name mylogstream --definition "http --port=8001 | log --level=WARN" --deploy
-
-By default, the message payload is logged; this can be changed with the `--expression` property (e.g. `payload.foo` to log some property `foo` of the payload, or `#root` to log the entire message)
-
-  xd:> stream create --name mylogstream --definition "http --port=8001 | log --expression=#root" --deploy
+TIP: If the `script` option is set, the script file's modified timestamp is checked for changes every 60 seconds by
+default; this can be changed with the `refreshDelay` deployment property: `--refreshDelay=30000` (every 30 seconds or
+30,000ms), `--refreshDelay=-1` to disable refresh.
 
 [[file-sink]]
-=== File Sink
+=== File Sink (`file`)
 
 Another simple option is to stream data to a file on the host OS. This can be done using the `file` sink module to create a xref:Streams#streams[stream].
 
@@ -107,6 +177,33 @@ You can cutomize the behavior and specify the `name` and `dir` options of the ou
 
   xd:> stream create --name otherfilestream --definition "http --port=8000 | file --name=myfile --dir=/some/custom/directory" --deploy
 
+To set the filename from a SpEL expression (e.g. headers['file_name']), you can use the `nameExpression` option.
+
+  xd:> stream create --name myfilestream --definition "http --port=8000 | file --nameExpression=payload.trim()" --deploy
+
+If you run this command :
+
+  xd:> http post --target http://localhost:8000 --data "hello.txt"
+
+It will take the payload of the message ("hello.txt"), as it's defined previously with `nameExpression`, and use it
+as the filename. In this example, the filename is equal to the content of the file.
+
+You can use `dirExpression` to specify the name of the directory that will contain the new file.
+
+  xd:> stream create --name myfilestream --definition "http --port=8000 | file --nameExpression=payload.trim() --dirExpression='''/tmp/test/dir-'' + payload.trim()'" --deploy
+
+If you run this command :
+
+  xd:> http post --target http://localhost:8000 --data "hello.txt"
+
+For the filename, it will do the same thing as explained previously. For the directory name it will use
+the content of the file (trimmed) concatenated with 'dir-' (in that case : "/tmp/test/dir-hello.txt").
+If the destination directory does not exists, the respective destination directory and any non-existing
+parent directories are being created automatically.
+
+When you use the `nameExpression` option you have to use the `dirExpression` option (not the `dir` option) to
+specify the destination directory name, even if it's a simple string (e.g. `'mydir'`).
+
 ==== File with Options
 //^sink.file
 // DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.file' TAG
@@ -116,13 +213,393 @@ The **$$file$$** $$sink$$ has the following options:
 $$binary$$:: $$if false, will append a newline character at the end of each line$$ *($$boolean$$, default: `false`)*
 $$charset$$:: $$the charset to use when writing a String payload$$ *($$String$$, default: `UTF-8`)*
 $$dir$$:: $$the directory in which files will be created$$ *($$String$$, default: `/tmp/xd/output/`)*
+$$dirExpression$$:: $$spring expression used to define directory name$$ *($$String$$, no default)*
 $$mode$$:: $$what to do if the file already exists$$ *($$Mode$$, default: `APPEND`, possible values: `APPEND,REPLACE,FAIL,IGNORE`)*
 $$name$$:: $$filename pattern to use$$ *($$String$$, default: `<stream name>`)*
+$$nameExpression$$:: $$spring expression used to define filename$$ *($$String$$, no default)*
 $$suffix$$:: $$filename extension to use$$ *($$String$$, no default)*
 //$sink.file
 
+[[ftp-sink]]
+=== FTP Sink (`ftp`)
+
+FTP sink is a simple option to push files to an FTP server from incoming messages.
+
+It uses an `ftp-outbound-adapter`, therefore incoming messages could be either a `java.io.File` object, a `String` (content of the file)
+or an array of `bytes` (file content as well).
+
+To use this sink, you need a username and a password to login. Once you have this you can stream
+data from, for instance, a file source to the ftp sink:
+
+  xd:> stream create --name mystream --definition "file | ftp --username=me --password=mypwd" --deploy
+
+We use the file source, so create a file:
+
+[source,bash]
+----
+$ echo hello > /tmp/xd/input/mystream/test.txt
+----
+
+On the ftp server, you should see the file `test.txt` with the content `hello`.
+
+To pass the filename to the module you can use the header `file_name` with the filename you wish to be used.
+
+NOTE:
+By default Spring Integration will use `o.s.i.file.DefaultFileNameGenerator` if none is specified. `DefaultFileNameGenerator` will determine the file name
+based on the value of the `file_name` header (if it exists) in the `MessageHeaders`, or if the payload of the `Message` is already a `java.io.File`, then it will
+use the original name of that file.
+
+==== FTP with Options
+//^sink.ftp
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.ftp' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$ftp$$** $$sink$$ has the following options:
+
+$$autoCreateDir$$:: $$remote directory must be auto created if it does not exist$$ *($$boolean$$, default: `true`)*
+$$clientMode$$:: $$client mode to use: 2 for passive mode and 0 for active mode$$ *($$int$$, default: `0`)*
+$$host$$:: $$the host name for the FTP server$$ *($$String$$, default: `localhost`)*
+$$mode$$:: $$what to do if the file already exists$$ *($$Mode$$, default: `REPLACE`, possible values: `APPEND,REPLACE,FAIL,IGNORE`)*
+$$password$$:: $$the password for the FTP connection$$ *($$Password$$, no default)*
+$$port$$:: $$the port for the FTP server$$ *($$int$$, default: `21`)*
+$$remoteDir$$:: $$the remote directory to transfer the files to$$ *($$String$$, default: `/`)*
+$$remoteFileSeparator$$:: $$file separator to use on the remote side$$ *($$String$$, default: `/`)*
+$$temporaryRemoteDir$$:: $$temporary remote directory that should be used$$ *($$String$$, default: `/`)*
+$$tmpFileSuffix$$:: $$extension to use on server side when uploading files$$ *($$String$$, default: `.tmp`)*
+$$useTemporaryFilename$$:: $$use a temporary filename while transferring the file and rename it to its final name once it's fully transferred$$ *($$boolean$$, default: `true`)*
+$$username$$:: $$the username for the FTP connection$$ *($$String$$, no default)*
+//$sink.ftp
+
+[[gemfire-server]]
+=== GemFire Server
+
+Currently XD supports GemFire's client-server topology. A sink that writes data to a GemFire cache requires at least one  cache server to be running in a separate process and may also be configured to use a Locator. While Gemfire configuration is outside of the scope of this document, details are covered in the http://docs.gopivotal.com/gemfire/index.html[GemFire Product documentation]. The XD distribution includes a standalone GemFire server executable suitable for development and test purposes and bootstrapped using a Spring configuration file provided as a command line argument. The GemFire jar is distributed freely under GemFire's development license and is subject to the license's terms and conditions. Sink modules provided with the XD distrubution that write data to GemFire create a client cache and client region. No data is cached on the client.
+
+TIP: If native gemfire properties are required to configure the client cache, e.g., for security, place a `gemfire.properties` file in $XD_HOME/config.
+
+==== Launching the XD GemFire Server
+
+To start the GemFire cache server GemFire Server included in the Spring XD distribution, go to the XD install directory:
+
+   $cd gemfire/bin
+   $./gemfire-server ../config/cq-demo.xml
+
+The command line argument is the path of a Spring Data Gemfire configuration file with including a configured cache server and one or more regions. A sample cache configuration is provided https://github.com/SpringSource/spring-xd/blob/master/spring-xd-gemfire-server/config/cq-demo.xml[cq-demo.xml] located in the `config` directory. Note that Spring interprets the path as a relative path unless it is explicitly preceded by `file:`. The sample configuration starts a server on port 40404 and creates a region named _Stocks_.
+
+==== Gemfire sinks
+
+There are 2 implementations of the gemfire sink: `gemfire-server` and `gemfire-json-server`. They are identical except the latter converts JSON string payloads to a JSON document format proprietary to GemFire and provides JSON field access and query capabilities. If you are not using JSON, the gemfire-server module will write the payload using java serialization to the configured region. Both modules accept the same options.
+
+//^sink.gemfire-server
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.gemfire-server' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$gemfire-server$$** $$sink$$ has the following options:
+
+$$host$$:: $$host name of the cache server or locator (if useLocator=true). May be a comma delimited list$$ *($$String$$, no default)*
+$$keyExpression$$:: $$a SpEL expression which is evaluated to create a cache key$$ *($$String$$, default: `'<stream name>'`)*
+$$port$$:: $$port of the cache server or locator (if useLocator=true). May be a comma delimited list$$ *($$String$$, no default)*
+$$regionName$$:: $$name of the region to use when storing data$$ *($$String$$, default: `<stream name>`)*
+$$useLocator$$:: $$indicates whether a locator is used to access the cache server$$ *($$boolean$$, default: `false`)*
+//$sink.gemfire-server
+
+TIP: The `keyExpression`, as its name suggests, is a SpEL. Typically, the key value is derived from the payload. The default of `'<streamname>'` (mind the quotes), will overwrite the same entry for every message received on the stream.
+
+NOTE: The `useLocator` option is intended for integration with an existing GemFire installation in which the cache servers are configured to use locators in accordance with best practice. GemFire supports configuration of multiple locators (or direct server connections) and this is specified by supplying comma-delimited values for the `host` and `port` options. You may specify a single value for either of these options otherwise each value must contain the same size list. The following are examples are valid for multiple connection addresses:
+
+    gemfire-server --host=myhost --port=10334,10335
+    gemfire server --host=myhost1,myhost2 --port=10334
+    gemfire server --host=myhost1,myhost2,myhost3 --port=10334,10335,10336
+
+The last example creates connections to myhost1:10334, myhost2:10335, myhost3:10336
+
+NOTE: You may also configure default Gemfire connection settings for all gemfire modules in `config\modules.yml`:
+
+    gemfire:
+       useLocator: true
+       host: myhost1,myhost2
+       port: 10334
+
+==== Example
+Suppose we have a JSON document containing a stock price:
+
+      {"symbol":"FAKE", "price":73}
+
+We want this to be cached using the stock symbol as the key. The stream definition is:
+
+     http | gemfire-json-server --regionName=Stocks --keyExpression=payload.getField('symbol')
+
+The keyExpression is a SpEL expression that depends on the payload type. In this case, _com.gemstone.org.json.JSONObject. JSONObject_ which  provides the _getField_ method. To run this example:
+
+    xd:> stream create --name stocks --definition "http --port=9090 | gemfire-json-server --regionName=Stocks --keyExpression=payload.getField('symbol')" --deploy
+
+    xd:> http post --target http://localhost:9090 --data {"symbol":"FAKE","price":73}
+
+This will write an entry to the GemFire _Stocks_ region with the key _FAKE_.  Please do not put spaces when separating the JSON key-value pairs, only a comma.
+
+You should see a message on STDOUT for the process running the GemFire server like:
+
+    INFO [LoggingCacheListener] - updated entry FAKE
+
+TIP: If you are deploying on Java 7 or earlier and need to deploy more than 4 Gemfire modules, be sure to increase the permsize of the singlenode or container. i.e. JAVA_OPTS="-XX:PermSize=256m".
+
+[[gpfdist]]
+=== GPFDIST
+
+The gpfdist sink allows you to stream data in parallel to either Pivotal Greenplum DB
+ or Pivotal HAWQ.  Internally, this sink creates a custom http listener that supports
+the `gpfdist` protcol and schedules a task that orchestrates a `gploadd` session in the
+same way it is done natively in Greenplum.
+
+No data is written into temporary files and all data is kept in stream buffers waiting
+to get inserted into Greenplum DB or HAWQ.  If there are no existing load sessions from Greenplum,
+the sink will block until such sessions are established.
+
+==== Example usage
+
+The https://github.com/spring-projects/spring-xd-modules/tree/master/load-generator-gpfdist-source[load-generator-gpfdist] source can be used to send dummy test data to the `gpfdist` sink.
+
+Using `psql`, create the following table with a simple schema that matches the data produced by the
+`load-generator-string` source, two integer values, a producer ID and a timestamp separated by a tab.
+
+[source,text]
+----
+create table xdsink (date integer, time integer) distributed randomly;
+----
+
+Now create the stream definition and deploy.  You should ensure that your pg_hba.conf (e.g. /data/master/gpsne-1/pg_hba.conf) is configured to allow a connection from your host where you are running the gpfdist sink. (an entry such as `host     all         gpadmin         192.168.70.128/32	trust`)
+
+[source,text]
+----
+xd:>stream create --name gpfdiststream --definition "load-generator-gpfdist --messageCount=10000000 --producers=1 --recordType=counter  | gpfdist --dbHost=192.168.70.138 --table=xdsink --batchTimeout=5 --batchCount=1000 --batchPeriod=0 --flushCount=200 --flushTime=2 --rateInterval=1000000" --deploy
+Created and deployed new stream 'gpfdiststream'
+----
+
+In this XD stream we send 10M messages from the `load-generator-string` source to the `gpfdist` sink.
+We roughly keep load session alive for 5 seconds while flushing data after 2s or 200 entries which ever
+comes first and sleep 0s in between load sessions.
+
+You will see log output (you will probably need to set the log level of the package log4j.logger.org.springframework.xd.greenplum to INFO.)
+[source,text]
+----
+2015-05-14 22:48:23,669 1.2.0.SNAP  INFO pool-14-thread-1 gpfdist.GPFDistMessageHandler - METER: 1 minute rate = 200000.0 mean rate = 269618.7284878825
+2015-05-14 22:48:25,495 1.2.0.SNAP  INFO sqlTaskScheduler-1 support.CleanableJdbcOperations - DROP EXTERNAL TABLE xdsink_ext_fabcf3bb_c514_49ca_bfd6_cacb009463dc
+2015-05-14 22:48:25,498 1.2.0.SNAP  INFO sqlTaskScheduler-1 support.CleanableJdbcOperations - CREATE READABLE EXTERNAL TABLE xdsink_ext_ae89e85d_eb65_4e11_ad72_4b8302086ebd ( LIKE xdsink ) LOCAT
+----
+
+`gpfdist` sink currently contains a throughput meter for this POC to
+get perf numbers. In this case it is showing about 270K/sec
+messages per second to be transferred from XD into Greenplum.
+
+In previous example we did a simple inserts into a table. Let's see
+how we can update data in a table. Create a simple table `xdsink2`
+with three text columns and insert some data.
+
+[source,text]
+----
+create table xdsink2 (col1 text, col2 text, col3 text);
+insert into xdsink2 values ('DATA1', 'DATA', 'DATA');
+insert into xdsink2 values ('DATA2', 'DATA', 'DATA');
+insert into xdsink2 values ('DATA3', 'DATA', 'DATA');
+----
+
+We'd have different data in `col1` which is used to match data to be
+updated.
+
+[source,text]
+----
+# select * from xdsink2;
+ col1  | col2 | col3
+-------+------+------
+ DATA3 | DATA | DATA
+ DATA2 | DATA | DATA
+ DATA1 | DATA | DATA
+----
+
+Let's create a stream which will update table `xdsink2` by matching a
+column `col1` and updates columns `col2` and `col3`.
+
+[source,text]
+----
+xd:>stream create --name gpfdiststream2 --definition "http|gpfdist --mode=UPDATE --table=xdsink2 --dbHost=mdw --columnDelimiter=',' --matchColumns=col1 --updateColumns=col2,col3" --deploy
+----
+
+Post some data into a stream which will be passed into a `gpfdist`
+sink via `http` source.
+
+[source,text]
+----
+xd:>http post --data "DATA1,DATA1,DATA1"
+----
+
+If you query table again, you'll see that row for `DATA1` has been
+updated.
+
+[source,text]
+----
+# select * from xdsink2;
+ col1  | col2  | col3
+-------+-------+-------
+ DATA3 | DATA  | DATA
+ DATA2 | DATA  | DATA
+ DATA1 | DATA1 | DATA1
+----
+
+==== Performance Notes
+
+On a Lenovo W540, Spring XD singlenode, `load-generator-string | gpfdist` inserted data at ~ 540K/sec.
+The underlying message handler in the gpfdist sink is able to achieve ~1.2M/sec, which is comprable to
+the use of the native gpload client.  Additional performance optimizations when used within an XD stream
+are on the roadmap.
+
+==== Implementation Notes
+
+Within a `gpfdist` sink we have a Reactor based stream where data is published from the incoming SI channel.
+This channel receives data from the Message Bus.  The Reactor stream is then connected to `Netty` based
+http channel adapters so that when a new http connection is established, the Reactor stream is flushed and balanced among
+existing http clients.  When `Greenplum` does a load from an external table, each segment will initiate
+a http connection and start loading data.  The net effect is that incoming data is automatically spread
+among the Greenplum segments.
+
+==== GPFDIST with Options
+
+The options `flushCount` and `flushTime` are used to determine when to flush
+data that is buffered in an internal
+http://projectreactor.io/docs/reference/streams.html#basics[Reactor stream] to
+the http connection.  Data is flushed based on if the count value has been reached
+or the time specified has elapsed.  Note that with too high a value, memory consumption
+will go up.  Too small a value combined with a low ingestion rate will result in data
+being inserted into the database less frequently.
+
+`batchCount` defines the maximum count of aggregated windows the client
+takes before the internal Reactor stream and http channel is closed.
+
+`batchTimeout` defines how many seconds each http connection should be
+kept alive if no data is streamed to a client. Use this together with
+`batchCount` to estimate how long each loading session should last.
+
+`batchPeriod` defines how many seconds a task running load operation
+should sleep in between a loads.
+
+`mode` defines a database load logic which is either `INSERT` or
+`UPDATE`. `INSERT` is a default mode. Similar to control file
+`GPLOAD.OUTPUT.MODE` property. `MERGE` is not currently supported.
+
+`columnDelimiter` defines a data delimiter character within a line of
+data. Defaults to tabulator character. Similar to control file
+`GPLOAD.SOURCE.DELIMITER` property.
+
+`updateColumns` defines updated column names and required with mode
+`UPDATE`. Similar to control file `GPLOAD.OUTPUT.UPDATE_COLUMNS` property.
+
+`matchColumns` defines matched column names and required with mode
+`UPDATE`. Similar to control file `GPLOAD.OUTPUT.MATCH_COLUMNS` property.
+
+`sqlBefore` defines a simple sql clause to be run before of every load
+operation. Similar to control file `GPLOAD.SQL.BEFORE` property.
+
+`sqlAfter` defines a simple sql clause to be run after of every load
+operation. Similar to control file `GPLOAD.SQL.AFTER` property.
+
+`delimiter` is used to postfix incoming data with a line termination
+because Greenplum expects line terminated data.
+
+`controlFile` can be used to introduce more parameters for a load
+operation. For simple use cases, the `table` property can be used.
+
+`rateInterval` if set, enables rate logging passing through sink.
+
+//^sink.gpfdist
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.gpfdist' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$gpfdist$$** $$sink$$ has the following options:
+
+$$batchCount$$:: $$batch count$$ *($$int$$, default: `100`)*
+$$batchPeriod$$:: $$batch period$$ *($$int$$, default: `10`)*
+$$batchTimeout$$:: $$batch timeout$$ *($$int$$, default: `4`)*
+$$columnDelimiter$$:: $$column delimiter$$ *($$Character$$, no default)*
+$$controlFile$$:: $$path to yaml control file$$ *($$String$$, no default)*
+$$dbHost$$:: $$database host$$ *($$String$$, default: `localhost`)*
+$$dbName$$:: $$database name$$ *($$String$$, default: `gpadmin`)*
+$$dbPassword$$:: $$database password$$ *($$String$$, default: `gpadmin`)*
+$$dbPort$$:: $$database port$$ *($$int$$, default: `5432`)*
+$$dbUser$$:: $$database user$$ *($$String$$, default: `gpadmin`)*
+$$delimiter$$:: $$data line delimiter$$ *($$String$$, default: `
+`)*
+$$flushCount$$:: $$flush item count$$ *($$int$$, default: `100`)*
+$$flushTime$$:: $$flush item time$$ *($$int$$, default: `2`)*
+$$matchColumns$$:: $$match columns with update$$ *($$String$$, no default)*
+$$mode$$:: $$mode, either insert or update$$ *($$String$$, no default)*
+$$port$$:: $$gpfdist listen port$$ *($$int$$, default: `0`)*
+$$rateInterval$$:: $$enable transfer rate interval$$ *($$int$$, default: `0`)*
+$$sqlAfter$$:: $$sql to run after load$$ *($$String$$, no default)*
+$$sqlBefore$$:: $$sql to run before load$$ *($$String$$, no default)*
+$$table$$:: $$target database table$$ *($$String$$, no default)*
+$$updateColumns$$:: $$update columns with update$$ *($$String$$, no default)*
+//$sink.gpfdist
+
+[[cassandra]]
+=== Cassandra
+
+The Cassandra sink write into a Cassandra table.  Here is a simple example
+
+  xd:>stream create cassandraTest --definition "http | cassandra --initScript=file:<absolut-path-to>/int-db.cql --ingestQuery='insert into book (isbn, title, author) values (uuid(), ?, ?)'" --deploy
+
+Where `int-db.cql` looks like:
+
+[source,text]
+----
+DROP TABLE IF EXISTS book;
+
+CREATE TABLE book  (
+    isbn        uuid PRIMARY KEY,
+    author      text,
+    instock     boolean,
+    pages       int,
+    saledate    timestamp,
+    title       text
+);
+----
+
+You can then send data to this stream via
+
+  xd:>http post --data "{\"title\": \"The Art of War\", \"author\": \"Sun Tzu\"}" --target http://localhost:9000
+
+and see the table contents using the CQL
+
+  SELECT * FROM cassandratest.book;
+
+Another Insert example using a domain 'Book' object is
+
+  xd:>stream create cassandraTest2 --definition "http | transform --expression='new org.springframework.xd.test.domain.Book(T(java.util.UUID).randomUUID(), #jsonPath(payload, \"$.title\"), #jsonPath(payload, \"$.author\"))' | cassandra --keyspace=cassandraTest" --deploy
+
+  http post --data "{\"title\": \"The Art of War\", \"author\": \"Sun Tzu\"}" --target http://localhost:9000
+
+You must place your domain object into the xd/lib directory, since some Spring Data comons classes are in the `xd/lib` directory and loaded into root classpath, not the module's classpath.
+
+//^sink.cassandra
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.cassandra' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$cassandra$$** $$sink$$ has the following options:
+
+$$compressionType$$:: $$the compression to use for the transport$$ *($$CompressionType$$, default: `NONE`, possible values: `NONE,SNAPPY`)*
+$$consistencyLevel$$:: $$the consistencyLevel option of WriteOptions$$ *($$ConsistencyLevel$$, no default, possible values: `ANY,ONE,TWO,THREE,QUOROM,LOCAL_QUOROM,EACH_QUOROM,ALL,LOCAL_ONE,SERIAL,LOCAL_SERIAL`)*
+$$contactPoints$$:: $$the comma-delimited string of the hosts to connect to Cassandra$$ *($$String$$, default: `localhost`)*
+$$entityBasePackages$$:: $$the base packages to scan for entities annotated with Table annotations$$ *($$String[]$$, default: `[]`)*
+$$ingestQuery$$:: $$the ingest Cassandra query$$ *($$String$$, no default)*
+$$initScript$$:: $$the path to file with CQL scripts (delimited by ';') to initialize keyspace schema$$ *($$String$$, no default)*
+$$keyspace$$:: $$the keyspace name to connect to$$ *($$String$$, default: `<stream name>`)*
+$$metricsEnabled$$:: $$enable/disable metrics collection for the created cluster$$ *($$boolean$$, default: `true`)*
+$$password$$:: $$the password for connection$$ *($$String$$, no default)*
+$$port$$:: $$the port to use to connect to the Cassandra host$$ *($$int$$, default: `9042`)*
+$$queryType$$:: $$the queryType for Cassandra Sink$$ *($$Type$$, default: `INSERT`, possible values: `INSERT,UPDATE,DELETE,STATEMENT`)*
+$$retryPolicy$$:: $$the retryPolicy  option of WriteOptions$$ *($$RetryPolicy$$, no default, possible values: `DEFAULT,DOWNGRADING_CONSISTENCY,FALLTHROUGH,LOGGING`)*
+$$statementExpression$$:: $$the expression in Cassandra query DSL style$$ *($$String$$, no default)*
+$$ttl$$:: $$the time-to-live option of WriteOptions$$ *($$int$$, default: `0`)*
+$$username$$:: $$the username for connection$$ *($$String$$, no default)*
+//$sink.cassandra
+
+
 [[hadoop-hdfs]]
-=== Hadoop (HDFS)
+=== Hadoop (HDFS) (`hdfs`)
 
 
 If you do not have Hadoop installed, you can install Hadoop as described in our xref:Hadoop-Installation#installing-hadoop[separate guide]. Spring XD supports 4 Hadoop distributions, see xref:Running-Distributed-Mode#using-hadoop[using Hadoop] for more information on how to start Spring XD to target a specific distribution.
@@ -141,7 +618,7 @@ In this example the hdfs protocol is used but you may also use the webhdfs proto
   Found 1 items
   -rw-r--r--   3 jvalkealahti supergroup          0 2013-12-18 18:10 /xd/myhdfsstream1/myhdfsstream1-0.txt.tmp
 
-While the file is being written to it will have the `tmp` suffix.  When the data written exceeds the rollover size (default 1GB) it will be renamed to remove the `tmp` suffix.  There are several options to control the in use file file naming options.  These are `--inUsePrefix` and `--inUseSuffix` set the file name prefix and suffix respectfully.  
+While the file is being written to it will have the `tmp` suffix.  When the data written exceeds the rollover size (default 1GB) it will be renamed to remove the `tmp` suffix.  There are several options to control the in use file file naming options.  These are `--inUsePrefix` and `--inUseSuffix` set the file name prefix and suffix respectfully.
 
 When you destroy a stream
 
@@ -161,7 +638,7 @@ To list the list the contents of a file directly from a shell execute the hadoop
   2013-12-18 18:10:09
   ...
 
-In the above examples we didn't yet go through why the file was written in a specific directory and why it was named in this specific way. Default location of a file is defined as `/xd/<stream name>/<stream name>-<rolling part>.txt`. These can be changed using options `--directory` and `--fileName` respectively. Example is shown below. 
+In the above examples we didn't yet go through why the file was written in a specific directory and why it was named in this specific way. Default location of a file is defined as `/xd/<stream name>/<stream name>-<rolling part>.txt`. These can be changed using options `--directory` and `--fileName` respectively. Example is shown below.
 
   xd:>stream create --name myhdfsstream2 --definition "time | hdfs --directory=/xd/tmp --fileName=data" --deploy
   xd:>stream destroy --name myhdfsstream2
@@ -170,7 +647,7 @@ In the above examples we didn't yet go through why the file was written in a spe
   -rw-r--r--   3 jvalkealahti supergroup        120 2013-12-18 18:31 /xd/tmp/data-0.txt
 
 It is also possible to control the size of a files written into HDFS. The `--rollover` option can be used to control when file currently being written is rolled over and a new file opened by providing the rollover size in bytes, kilobytes, megatypes, gigabytes, and terabytes.
- 
+
   xd:>stream create --name myhdfsstream3 --definition "time | hdfs --rollover=100" --deploy
   xd:>stream destroy --name myhdfsstream3
   xd:>hadoop fs ls /xd/myhdfsstream3
@@ -189,7 +666,7 @@ The stream can also be compressed during the write operation. Example of this is
   Found 1 items
   -rw-r--r--   3 jvalkealahti supergroup         80 2013-12-18 18:48 /xd/myhdfsstream4/myhdfsstream4-0.txt.gzip
 
-From a native os shell we can use hadoop's fs commands and pipe data into gunzip. 
+From a native os shell we can use hadoop's fs commands and pipe data into gunzip.
 
   # bin/hadoop fs -cat /xd/myhdfsstream4/myhdfsstream4-0.txt.gzip | gunzip
   2013-12-18 18:48:10
@@ -264,7 +741,7 @@ Partitioning can also be based on defined ranges. In a below example we simulate
 
 Let the stream run few seconds, destroy it and check what got written in those partitioned files.
 
-  xd:>stream destroy --name myhdfsstream8 
+  xd:>stream destroy --name myhdfsstream8
   Destroyed stream 'myhdfsstream8'
   xd:>hadoop fs ls --recursive true --dir /xd
   drwxr-xr-x   - jvalkealahti supergroup          0 2014-05-28 19:34 /xd/myhdfsstream8
@@ -297,7 +774,7 @@ Partition using a `dateFormat` can be based on content itself. This is a good us
 
 Let the stream run few seconds, destroy it and check what got written in those partitioned files. If you see the partition paths, those are based on year 1970, not present year.
 
-  xd:>stream destroy --name myhdfsstream9 
+  xd:>stream destroy --name myhdfsstream9
   Destroyed stream 'myhdfsstream9'
   xd:>hadoop fs ls --recursive true --dir /xd
   drwxr-xr-x   - jvalkealahti supergroup          0 2014-05-28 19:56 /xd/myhdfsstream9
@@ -328,14 +805,17 @@ Let the stream run few seconds, destroy it and check what got written in those p
 // THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
 The **$$hdfs$$** $$sink$$ has the following options:
 
+$$closeTimeout$$:: $$timeout in ms, regardless of activity, after which file will be automatically closed$$ *($$long$$, default: `0`)*
 $$codec$$:: $$compression codec alias name (gzip, snappy, bzip2, lzo, or slzo)$$ *($$String$$, default: ``)*
 $$directory$$:: $$where to output the files in the Hadoop FileSystem$$ *($$String$$, default: `/xd/<stream name>`)*
+$$enableSync$$:: $$whether writer will sync to datanode when flush is called, setting this to 'true' could impact throughput$$ *($$boolean$$, default: `false`)*
 $$fileExtension$$:: $$the base filename extension to use for the created files$$ *($$String$$, default: `txt`)*
 $$fileName$$:: $$the base filename to use for the created files$$ *($$String$$, default: `<stream name>`)*
 $$fileOpenAttempts$$:: $$maximum number of file open attempts to find a path$$ *($$int$$, default: `10`)*
 $$fileUuid$$:: $$whether file name should contain uuid$$ *($$boolean$$, default: `false`)*
+$$flushTimeout$$:: $$timeout in ms, regardless of activity, after which data written to file will be flushed$$ *($$long$$, default: `0`)*
 $$fsUri$$:: $$the URI to use to access the Hadoop FileSystem$$ *($$String$$, default: `${spring.hadoop.fsUri}`)*
-$$idleTimeout$$:: $$inactivity timeout after file will be automatically closed$$ *($$long$$, default: `0`)*
+$$idleTimeout$$:: $$inactivity timeout in ms after which file will be automatically closed$$ *($$long$$, default: `0`)*
 $$inUsePrefix$$:: $$prefix for files currently being written$$ *($$String$$, default: ``)*
 $$inUseSuffix$$:: $$suffix for files currently being written$$ *($$String$$, default: `.tmp`)*
 $$overwrite$$:: $$whether writer is allowed to overwrite files in Hadoop FileSystem$$ *($$boolean$$, default: `false`)*
@@ -420,7 +900,7 @@ range(Object source, List<Object> list)
 
 Creates a partition path part by matching a `source` against a list denoted by `list` using a simple binary search.
 
-The partition method takes a `source` as first argument and `list` as a second argument. Behind the scenes this is using jvm’s `binarySearch` which works on an `Object` level so we can pass in anything. Remember that meaningful range match only works if passed in `Object` and types in list are of same type like `Integer`. Range is defined by a binarySearch itself so mostly it is to match against an upper bound except the last range in a list. Having a list of `{1000,3000,5000}` means that everything above 3000 will be matched with 5000. If that is an issue then simply adding `Integer.MAX_VALUE` as last range would overflow everything above 5000 into a new partition. Created partitions would then be `1000_range`, `3000_range` and `5000_range`. 
+The partition method takes a `source` as first argument and `list` as a second argument. Behind the scenes this is using jvm’s `binarySearch` which works on an `Object` level so we can pass in anything. Remember that meaningful range match only works if passed in `Object` and types in list are of same type like `Integer`. Range is defined by a binarySearch itself so mostly it is to match against an upper bound except the last range in a list. Having a list of `{1000,3000,5000}` means that everything above 3000 will be matched with 5000. If that is an issue then simply adding `Integer.MAX_VALUE` as last range would overflow everything above 5000 into a new partition. Created partitions would then be `1000_range`, `3000_range` and `5000_range`.
 
 .Parameters
 source:: An `Object` to be matched against `list`.
@@ -445,7 +925,7 @@ bucketcount:: A number of buckets
 A path part prefixed with a hash key i.e. `XXX_hash`.
 
 [[hdfs-dataset-avroparquet]]
-=== HDFS Dataset (Avro/Parquet)
+=== HDFS Dataset (Avro/Parquet) (`hdfs-dataset`)
 
 The HDFS Dataset sink is used to store Java classes that are sent as the payload on the stream. It uses the http://kitesdk.org/[Kite SDK Data Module]'s Dataset implementation to store the payload data serialized in either Avro or Parquet format. The Avro schema is generated from the Java class that is persisted. For Parquet the Java object must follow JavaBean conventions with properties for any fields to be persisted. The fields can only be simple scalar values like Strings and numbers.
 
@@ -469,7 +949,7 @@ Then list the contents of the stream's data directory.
   -rw-r--r--   3 trisberg supergroup        202 2013-12-19 12:23 /xd/mydataset/string/1387473825754-63.avro
   -rw-r--r--   3 trisberg supergroup        216 2013-12-19 12:24 /xd/mydataset/string/1387473846708-80.avro
 
-You can see that the sink has created two files containing the first two batches of 20 stream payloads each. There is also a `.metadata` directory created that contains the metadata that the Kite SDK Dataset implementation uses as well as the generated Avro schema for the persisted type. 
+You can see that the sink has created two files containing the first two batches of 20 stream payloads each. There is also a `.metadata` directory created that contains the metadata that the Kite SDK Dataset implementation uses as well as the generated Avro schema for the persisted type.
 
   xd:>hadoop fs ls /xd/mydataset/string/.metadata
   Found 2 items
@@ -477,7 +957,7 @@ You can see that the sink has created two files containing the first two batches
   -rw-r--r--   3 trisberg supergroup          8 2013-12-19 12:23 /xd/mydataset/string/.metadata/schema.avsc
 
 
-Now destroy the stream. 
+Now destroy the stream.
 
   xd:>stream destroy --name mydataset
 
@@ -511,7 +991,7 @@ The `partitionPath` option lets you specify one or more paths that will be used 
  * _dateformat_ creates partitions based on a timestamp and a dateformat expression provided - creates directories based on the name provided (works well with fields of datatype long)
    - specify function plus field name, a name for the partition and the date format like: `dateFormat('timestamp', 'Y-M', 'yyyyMM')`
  * _range_ creates partitions based on a field value and the upper bounds for each bucket that is specified (works well with fields of datatype int and string)
-   - specify function plus field name and the upper bounds for each partition bucket like: `range('age',20,50,80,T(Integer).MAX_VALUE)` (Note that you can use SpEL expressions like we just did for the Integer.MAX_VALUE) 
+   - specify function plus field name and the upper bounds for each partition bucket like: `range('age',20,50,80,T(Integer).MAX_VALUE)` (Note that you can use SpEL expressions like we just did for the Integer.MAX_VALUE)
  * _identity_ creates partitions based on the exact value of a field (works well with fields of datatype string, long and int)
    - specify function plus field name, a name for the partition, the type of the field (String or Integer) and the number of values/buckets for the partition like: `identity('region','R',T(String),10)`
  * _hash_ creates partitions based on the hash calculated from the value of a field divided into a number of buckets that is specified (works well with all data types)
@@ -534,6 +1014,8 @@ To create a stream using a `jdbc` sink relying on all defaults you would use a c
 This will insert the time messages into a 'payload' column in a table named 'mydata'. Since the default is using the XD batch metadata HSQLDB database we can connect to this database instance from an external tool. After we let the stream run for a little while, we can connect to the database and look at the data stored in the database.
 
 You can query the database with your favorite SQL tool using the following database URL: `jdbc:hsqldb:hsql://localhost:9101/xdjob` with `sa` as the user name and a blank password. You can also use the HSQL provided SQL Tool (download from link:http://hsqldb.org/[HSQLDB]) to run a quick query from the command line:
+
+NOTE: If you access any database other than HSQLDB or Postgres in a stream module then the JDBC driver jar for that database needs to be present in the `$XD_HOME/lib` directory.
 
 [source,bash]
 ----
@@ -607,10 +1089,370 @@ $$validatorClassName$$:: $$name of a class which implements the org.apache.tomca
 
 NOTE: To include the whole message into a single column, use `payload` (the default) for the `columns` option
 
-TIP: The connection pool settings for xd are located in servers.yml (i.e. `spring.datasource.*` )  
+TIP: The connection pool settings for xd are located in servers.yml (i.e. `spring.datasource.*` )
+
+
+
+[[kafka-sink]]
+=== Kafka Sink (`kafka`)
+
+Kafka sink can be used to ingest data into a specific Kafka topic configuration.
+
+For example,
+----
+xd:>stream create push-to-kafka --definition "http | kafka --topic=myTopic" --deploy
+xd:>Created and deployed new stream 'push-to-kafka'
+xd:>http post --data "push-messages"
+> POST (text/plain;Charset=UTF-8) http://localhost:9000 push-messages
+> 200 OK
+----
+Now, the posted messages will be available on kafka topic `myTopic`.
+
+//^sink.kafka
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.kafka' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$kafka$$** $$sink$$ has the following options:
+
+$$ackTimeoutOnServer$$:: $$the maximum amount of time the server will wait for acknowledgments from followers to meet the acknowledgment requirements the producer has specified with the acks configuration$$ *($$int$$, default: `30000`)*
+$$batchBytes$$:: $$batch size in bytes, per partition$$ *($$int$$, default: `16384`)*
+$$blockOnBufferFull$$:: $$whether to block or not when the memory buffer is full$$ *($$boolean$$, default: `true`)*
+$$brokerList$$:: $$comma separated broker list$$ *($$String$$, default: `localhost:9092`)*
+$$bufferMemory$$:: $$the total bytes of memory the producer can use to buffer records waiting to be sent to the server$$ *($$int$$, default: `33554432`)*
+$$compressionCodec$$:: $$compression codec to use$$ *($$String$$, default: `none`)*
+$$maxBufferTime$$:: $$the amount of time, in ms that the producer will wait before sending a batch to the server$$ *($$int$$, default: `0`)*
+$$maxRequestSize$$:: $$the maximum size of a request$$ *($$int$$, default: `1048576`)*
+$$maxSendRetries$$:: $$number of attempts to automatically retry a failed send request$$ *($$int$$, default: `3`)*
+$$receiveBufferBytes$$:: $$the size of the TCP receive buffer to use when reading data$$ *($$int$$, default: `32768`)*
+$$reconnectBackoff$$:: $$the amount of time to wait before attempting to reconnect to a given host when a connection fails$$ *($$long$$, default: `10`)*
+$$requestRequiredAck$$:: $$producer request acknowledgement mode$$ *($$int$$, default: `0`)*
+$$retryBackoff$$:: $$the amount of time to wait before attempting to retry a failed produce request to a given topic partition$$ *($$long$$, default: `100`)*
+$$sendBufferBytes$$:: $$the size of the TCP send buffer to use when sending data$$ *($$int$$, default: `131072`)*
+$$topic$$:: $$kafka topic name$$ *($$String$$, default: `<stream name>`)*
+$$topicMetadataFetchTimeout$$:: $$the maximum amount of time to block waiting for the metadata fetch to succeed$$ *($$int$$, default: `60000`)*
+$$topicMetadataRefreshInterval$$:: $$the period of time in milliseconds after which a refresh of metadata is forced$$ *($$int$$, default: `300000`)*
+//$sink.kafka
+
+[[log]]
+=== Log
+
+Probably the simplest option for a sink is just to log the data. The `log` sink uses the application logger to output the data for inspection. The log level is set to `WARN` and the logger name is created from the stream name. To create a stream using a `log` sink you would use a command like
+
+  xd:> stream create --name mylogstream --definition "http --port=8000 | log" --deploy
+
+You can then try adding some data. We've used the `http` source on port 8000 here, so run the following command to send a message
+
+  xd:> http post --target http://localhost:8000 --data "hello"
+
+and you should see the following output in the XD container console.
+
+  13/06/07 16:12:18 INFO sink.mylogstream: hello
+
+//^sink.log
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.log' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$log$$** $$sink$$ has the following options:
+
+$$expression$$:: $$the expression to be evaluated for the log content; use '#root' to log the full message$$ *($$String$$, default: `payload`)*
+$$level$$:: $$the log level$$ *($$String$$, default: `INFO`)*
+$$name$$:: $$the name of the log category to log to (will be prefixed by 'xd.sink.')$$ *($$String$$, default: `<stream name>`)*
+//$sink.log
+
+Here are some examples explaining the above options:
+
+The logger name is the sink name prefixed with the string `xd.sink.`. The sink name is the same as the stream name by default, but you can set it by passing the `--name` parameter
+
+  xd:> stream create --name myotherlogstream --definition "http --port=8001 | log --name=mylogger" --deploy
+
+The log level is `INFO` by default; this can be changed with the `--level` property (`FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, or `TRACE`)
+
+  xd:> stream create --name mylogstream --definition "http --port=8001 | log --level=WARN" --deploy
+
+By default, the message payload is logged; this can be changed with the `--expression` property (e.g. `payload.foo` to log some property `foo` of the payload, or `#root` to log the entire message)
+
+  xd:> stream create --name mylogstream --definition "http --port=8001 | log --expression=#root" --deploy
+
+[[mail]]
+=== Mail
+
+The "mail" sink allows sending of messages as emails, leveraging Spring Integration mail-sending channel adapter. Please refer to Spring Integration documentation for the details, but in a nutshell, the sink is able to handle String, byte[] and MimeMessage messages out of the box.
+
+Here is a simple example of how the mail module is used:
+
+  xd:> stream create mystream --definition "http | mail --to='\"your.email@gmail.com\"' --host=your.imap.server --subject=payload+' world'" --deploy
+
+Then,
+
+  xd:> http post --data Hello
+
+You would then receive an email whose body contains "Hello" and whose subject is "Hellow world". Of special attention here is the way you need to escape strings for most of the parameters, because they're actually SpEL expressions (so here for example, we used a String literal for the `to` parameter).
+
+//^sink.mail
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.mail' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$mail$$** $$sink$$ has the following options:
+
+$$bcc$$:: $$the recipient(s) that should receive a blind carbon copy (SpEL)$$ *($$String$$, default: `null`)*
+$$cc$$:: $$the recipient(s) that should receive a carbon copy (SpEL)$$ *($$String$$, default: `null`)*
+$$contentType$$:: $$the content type to use when sending the email (SpEL)$$ *($$String$$, default: `null`)*
+$$from$$:: $$the primary recipient(s) of the email (SpEL)$$ *($$String$$, default: `null`)*
+$$host$$:: $$the hostname of the mail server$$ *($$String$$, default: `localhost`)*
+$$password$$:: $$the password to use to connect to the mail server $$ *($$String$$, no default)*
+$$port$$:: $$the port of the mail server$$ *($$int$$, default: `25`)*
+$$replyTo$$:: $$the address that will become the recipient if the original recipient decides to "reply to" the email (SpEL)$$ *($$String$$, default: `null`)*
+$$subject$$:: $$the email subject (SpEL)$$ *($$String$$, default: `null`)*
+$$to$$:: $$the primary recipient(s) of the email (SpEL)$$ *($$String$$, default: `null`)*
+$$username$$:: $$the username to use to connect to the mail server$$ *($$String$$, no default)*
+//$sink.mail
+
+[[mongo]]
+=== Mongo
+The Mongo sink writes into a Mongo collection. Here is a simple example
+
+  xd:>stream create --name attendees --definition "http | mongodb --databaseName=test --collectionName=names" --deploy
+
+Then,
+
+  xd:>http post --data {"firstName":"mark"}
+
+In the mongo console you will see the document stored
+
+  > use test
+  switched to db test
+  > show collections
+  names
+  system.indexes
+  > db.names.find()
+  { "_id" : ObjectId("53c93bc324ac76925a77b9df"), "firstName" : "mark" }
+
+//^sink.mongodb
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.mongodb' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$mongodb$$** $$sink$$ has the following options:
+
+$$authenticationDatabaseName$$:: $$the MongoDB authentication database used for connecting$$ *($$String$$, default: ``)*
+$$collectionName$$:: $$the MongoDB collection to store$$ *($$String$$, default: `<stream name>`)*
+$$databaseName$$:: $$the MongoDB database name$$ *($$String$$, default: `xd`)*
+$$host$$:: $$the MongoDB host to connect to$$ *($$String$$, default: `localhost`)*
+$$password$$:: $$the MongoDB password used for connecting$$ *($$String$$, default: ``)*
+$$port$$:: $$the MongoDB port to connect to$$ *($$int$$, default: `27017`)*
+$$username$$:: $$the MongoDB username used for connecting$$ *($$String$$, default: ``)*
+$$writeConcern$$:: $$the default MongoDB write concern to use$$ *($$WriteConcern$$, default: `SAFE`, possible values: `NONE,NORMAL,SAFE,FSYNC_SAFE,REPLICAS_SAFE,JOURNAL_SAFE,MAJORITY`)*
+//$sink.mongodb
+
+[[mqtt-sink]]
+=== MQTT Sink (`mqtt`)
+The mqtt sink connects to an mqtt server and publishes telemetry messages.
+
+==== Options
+//^sink.mqtt
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.mqtt' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$mqtt$$** $$sink$$ has the following options:
+
+$$async$$:: $$whether or not to use async sends$$ *($$boolean$$, default: `false`)*
+$$charset$$:: $$the charset used to convert a String payload to byte[]$$ *($$String$$, default: `UTF-8`)*
+$$cleanSession$$:: $$whether the client and server should remember state across restarts and reconnects$$ *($$boolean$$, default: `true`)*
+$$clientId$$:: $$identifies the client$$ *($$String$$, default: `xd.mqtt.client.id.snk`)*
+$$connectionTimeout$$:: $$the connection timeout in seconds$$ *($$int$$, default: `30`)*
+$$keepAliveInterval$$:: $$the ping interval in seconds$$ *($$int$$, default: `60`)*
+$$password$$:: $$the password to use when connecting to the broker$$ *($$String$$, default: `guest`)*
+$$persistence$$:: $$'memory' or 'file'$$ *($$String$$, default: `memory`)*
+$$persistenceDirectory$$:: $$file location when using 'file' persistence$$ *($$String$$, default: `/tmp/paho`)*
+$$qos$$:: $$the quality of service to use$$ *($$int$$, default: `1`)*
+$$retained$$:: $$whether to set the 'retained' flag$$ *($$boolean$$, default: `false`)*
+$$topic$$:: $$the topic to which the sink will publish$$ *($$String$$, default: `xd.mqtt.test`)*
+$$url$$:: $$location of the mqtt broker(s) (comma-delimited list)$$ *($$String$$, default: `tcp://localhost:1883`)*
+$$username$$:: $$the username to use when connecting to the broker$$ *($$String$$, default: `guest`)*
+//$sink.mqtt
+
+NOTE: The defaults are set up to connect to the RabbitMQ MQTT adapter on localhost.
+
+[[null-sink]]
+=== Null Sink (`null`)
+
+Null sink can be useful when the main stream isn't focused on a specific destination but drives taps used for analytics etc.
+It is also useful to iteratively add in steps to a stream without worrying about where the data will end up.
+
+For example,
+
+----
+xd:>stream create nullStream --definition "http | null" --deploy
+Created and deployed new stream 'nullStream'
+xd:>stream create tap1 --definition "tap:stream:nullStream > counter" --deploy
+Created and deployed new stream 'tap1'
+----
+In the above, the null sink can be useful as we can create as many number of tap streams off the main stream while we set the main stream sink as null.
+
+[[rabbitmq]]
+=== RabbitMQ
+
+The "rabbit" sink enables outbound messaging over RabbitMQ.
+
+The following example shows the default settings.
+
+Configure a stream:
+
+     xd:> stream create --name rabbittest --definition "time --interval=3 | rabbit" --deploy
+
+This sends the time, every 3 seconds to the default (no-name) Exchange for a RabbitMQ broker running on localhost, port 5672.
+
+The routing key will be the name of the stream by default; in this case: "rabbittest". Since the default Exchange is a direct-exchange to which all Queues are bound with the Queue name as the binding key, all messages sent via this sink will be passed to a Queue named "rabbittest", if one exists. We do not create that Queue automatically. However, you can easily create a Queue using the RabbitMQ web UI. Then, using that same UI, you can navigate to the "rabbittest" Queue and click the "Get Message(s)" button to pop messages off of that Queue (you can choose whether to requeue those messages).
+
+To destroy the stream, enter the following at the shell prompt:
+
+    xd:> stream destroy --name rabbittest
+
+==== RabbitMQ with Options
+
+//^sink.rabbit
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.rabbit' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$rabbit$$** $$sink$$ has the following options:
+
+$$addresses$$:: $$a comma separated list of 'host[:port]' addresses$$ *($$String$$, default: `${spring.rabbitmq.addresses}`)*
+$$converterClass$$:: $$the class name of the message converter$$ *($$String$$, default: `org.springframework.amqp.support.converter.SimpleMessageConverter`)*
+$$deliveryMode$$:: $$the delivery mode (PERSISTENT, NON_PERSISTENT)$$ *($$String$$, default: `PERSISTENT`)*
+$$exchange$$:: $$the Exchange on the RabbitMQ broker to which messages should be sent$$ *($$String$$, default: ``)*
+$$keyStore$$:: $$keyStore location (if not using SSL properties)$$ *($$String$$, default: `${spring.rabbitmq.ssl.keyStore}`)*
+$$keyStorePassphrase$$:: $$keyStore passphrase (if not using SSL properties)$$ *($$String$$, default: `${spring.rabbitmq.ssl.keyStorePassphrase}`)*
+$$mappedRequestHeaders$$:: $$request message header names to be propagated to/from the adpater/gateway$$ *($$String$$, default: `STANDARD_REQUEST_HEADERS`)*
+$$password$$:: $$the password to use to connect to the broker$$ *($$String$$, default: `${spring.rabbitmq.password}`)*
+$$routingKey$$:: $$the routing key to be passed with the message, as a SpEL expression$$ *($$String$$, default: `'<stream name>'`)*
+$$sslPropertiesLocation$$:: $$resource containing SSL properties$$ *($$String$$, default: `${spring.rabbitmq.sslProperties}`)*
+$$trustStore$$:: $$trustStore location (if not using SSL properties)$$ *($$String$$, default: `${spring.rabbitmq.ssl.trustStore}`)*
+$$trustStorePassphrase$$:: $$trustStore passphrase (if not using SSL properties)$$ *($$String$$, default: `${spring.rabbitmq.ssl.trustStorePassphrase}`)*
+$$useSSL$$:: $$true if SSL should be used for the connection$$ *($$String$$, default: `${spring.rabbitmq.useSSL}`)*
+$$username$$:: $$the username to use to connect to the broker$$ *($$String$$, default: `${spring.rabbitmq.username}`)*
+$$vhost$$:: $$the RabbitMQ virtual host to use$$ *($$String$$, default: `${spring.rabbitmq.virtual_host}`)*
+//$sink.rabbit
+
+[NOTE]
+====
+Please be aware that the `routingKey` option is actually a SpEL expression. Hence if a simple, constant, string literal is to be used, make sure to use something like this:
+
+   xd:> stream create rabbitSinkStream --definition "http | rabbit --routingKey='\"myqueue\"'" --deploy
+====
+
+See the xref:MessageBus#rabbitssl[RabbitMQ MessageBus Documentation] for more information about SSL configuration.
+
+[[redis]]
+=== Redis
+
+Redis sink can be used to ingest data into redis store. You can choose `queue`, `topic` or `key` with selcted collection type to point to a specific data store.
+
+For example,
+----
+xd:>stream create store-into-redis --definition "http | redis --queue=myList" --deploy
+xd:>Created and deployed new stream 'store-into-redis'
+----
+
+==== Options
+
+//^sink.redis
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.redis' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$redis$$** $$sink$$ has the following options:
+
+$$collectionType$$:: $$the collection type to use for the given key$$ *($$CollectionType$$, default: `LIST`, possible values: `LIST,SET,ZSET,MAP,PROPERTIES`)*
+$$database$$:: $$database index used by the connection factory$$ *($$int$$, default: `0`)*
+$$hostname$$:: $$redis host name$$ *($$String$$, default: `localhost`)*
+$$key$$:: $$name for the key$$ *($$String$$, no default)*
+$$keyExpression$$:: $$a SpEL expression to use for keyExpression$$ *($$String$$, no default)*
+$$maxActive$$:: $$max number of connections that can be allocated by the pool at a given time; negative value for no limit$$ *($$int$$, default: `8`)*
+$$maxIdle$$:: $$max number of idle connections in the pool; a negative value indicates an unlimited number of idle connections$$ *($$int$$, default: `8`)*
+$$maxWait$$:: $$max amount of time (in milliseconds) a connection allocation should block before throwing an exception when the pool is exhausted; negative value to block indefinitely$$ *($$int$$, default: `-1`)*
+$$minIdle$$:: $$target for the minimum number of idle connections to maintain in the pool; only has an effect if it is positive$$ *($$int$$, default: `0`)*
+$$password$$:: $$redis password$$ *($$String$$, default: ``)*
+$$port$$:: $$redis port$$ *($$int$$, default: `6379`)*
+$$queue$$:: $$name for the queue$$ *($$String$$, no default)*
+$$queueExpression$$:: $$a SpEL expression to use for queue$$ *($$String$$, no default)*
+$$sentinelMaster$$:: $$name of Redis master server$$ *($$String$$, default: ``)*
+$$sentinelNodes$$:: $$comma-separated list of host:port pairs$$ *($$String$$, default: ``)*
+$$topic$$:: $$name for the topic$$ *($$String$$, no default)*
+$$topicExpression$$:: $$a SpEL expression to use for topic$$ *($$String$$, no default)*
+//$sink.redis
+
+
+[[shell-sink]]
+=== Shell Sink (`shell`)
+The `shell` sink forks an external process by running a shell command to launch a process written in any language. The process should implement a continual loop that waits for and consumes input from `stdin`. The process will be destroyed when the stream is undeployed. For example, it is possible to invoke a Python script within a stream in this manner. Since the shell sink relies on low-level stream processing there are some additional requirements:
+
+* Input data is expected to be a String, the `charset` is configurable.
+* Anything written to `stderr` will be logged as an ERROR in Spring XD but will not terminate the stream.
+* All messages must be terminated using the configured encoder (CRLF or "\r\n" is the default) for the module and must not exceed the configured `bufferSize` (see the detailed description of encoders in the <<tcp-sink, TCP>> section).
+* Any external software required to run the script must be installed on the container node to which the module is deployed.
+
+Here is a simple template for a Python script that consumes input:
+
+[source,python]
+----
+#sink.py
+import sys
+
+while True:
+  try:
+    data = raw_input()
+    if data:
+       #insert a function call here, data is a string.
+  except EOFError:
+      break
+----
+
+[NOTE]
+====
+Spring XD provides additional Python programming support for handling basic stream processing, as shown above, see xref:Creating-a-Python-Module[creating a Python module].
+====
+
+//^sink.shell
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.shell' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$shell$$** $$sink$$ has the following options:
+
+$$bufferSize$$:: $$the size of the buffer (bytes) to use when encoding/decoding$$ *($$int$$, default: `2048`)*
+$$charset$$:: $$the charset used when converting from String to bytes$$ *($$String$$, default: `UTF-8`)*
+$$command$$:: $$the shell command$$ *($$String$$, no default)*
+$$encoder$$:: $$the encoder to use when sending messages$$ *($$Encoding$$, default: `CRLF`, possible values: `CRLF,LF,NULL,STXETX,RAW,L1,L2,L4`)*
+$$environment$$:: $$additional process environment variables as comma delimited name-value pairs$$ *($$String$$, no default)*
+$$redirectErrorStream$$:: $$redirects stderr to stdout$$ *($$boolean$$, default: `false`)*
+$$workingDir$$:: $$the process working directory$$ *($$String$$, no default)*
+//$sink.shell
+
+[[splunk-server]]
+=== Splunk Server (`splunk`)
+A http://www.splunk.com/[Splunk] sink that writes data to a TCP Data Input type for Splunk.
+
+==== Splunk sinks
+The Splunk sink converts an object payload to a string using the object’s toString method and then converts this to a SplunkEvent that is sent via TCP to Splunk.
+
+//^sink.splunk
+// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.splunk' TAG
+// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
+The **$$splunk$$** $$sink$$ has the following options:
+
+$$host$$:: $$the host name or IP address of the Splunk server$$ *($$String$$, default: `localhost`)*
+$$owner$$:: $$the owner of the tcpPort$$ *($$String$$, default: `admin`)*
+$$password$$:: $$the password associated with the username$$ *($$String$$, default: `password`)*
+$$port$$:: $$the TCP port number of the Splunk server$$ *($$int$$, default: `8089`)*
+$$tcpPort$$:: $$the TCP port number to where XD will send the data$$ *($$int$$, default: `9500`)*
+$$username$$:: $$the login name that has rights to send data to the tcpPort$$ *($$String$$, default: `admin`)*
+//$sink.splunk
+
+==== How To Setup Splunk for TCP Input
+. From the Manager page select `Manage Inputs` link
+. Click the `Add data` Button
+. Click the `From a TCP port` link
+. `TCP Port` enter the port you want Splunk to monitor
+. `Set Source Type` select `Manual`
+. `Source Type` enter `tcp-raw`
+. Click `Save`
+
+==== Example
+An example stream would be to take data from a twitter search and push it through to a splunk instance.
+
+    xd:> stream create --name springone2gx --definition "twittersearch --consumerKey= --consumerSecret= --query='#LOTR' | splunk" --deploy
 
 [[tcp-sink]]
-=== TCP Sink
+=== TCP Sink (`tcp`)
 
 The TCP Sink provides for outbound messaging over TCP.
 
@@ -712,505 +1554,3 @@ $ hexdump -C foo
 ----
 
 Note the 4 byte length field preceding the data generated by the `L4` encoder.
-
-[[shell-sink]]
-=== Shell Sink
-The `shell` sink forks an external process by running a shell command to launch a process written in any language. The process should implement a continual loop that waits for and consumes input from `stdin`. The process will be destroyed when the stream is undeployed. For example, it is possible to invoke a Python script within a stream in this manner. Since the shell sink relies on low-level stream processing there are some additional requirements:
-
-* Input data is expected to be a String, the `charset` is configurable.
-* Anything written to `stderr` will be logged as an ERROR in Spring XD but will not terminate the stream.
-* All messages must be terminated using the configured encoder (CRLF or "\r\n" is the default) for the module and must not exceed the configured `bufferSize` (see the detailed description of encoders in the <<tcp-sink, TCP>> section).
-* Any external software required to run the script must be installed on the container node to which the module is deployed.
-
-Here is a simple template for a Python script that consumes input:
-
-[source,python]
-----
-#sink.py
-import sys
-
-while True:
-  try:
-    data = raw_input()
-    if data:
-       #insert a function call here, data is a string.
-  except EOFError:
-      break
-----
-
-[NOTE]
-====
-Spring XD provides additional Python programming support for handling basic stream processing, as shown above, see xref:Creating-a-Python-Module[creating a Python module]. 
-====
-
-//^sink.shell
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.shell' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$shell$$** $$sink$$ has the following options:
-
-$$bufferSize$$:: $$the size of the buffer (bytes) to use when encoding/decoding$$ *($$int$$, default: `2048`)*
-$$charset$$:: $$the charset used when converting from String to bytes$$ *($$String$$, default: `UTF-8`)*
-$$command$$:: $$the shell command$$ *($$String$$, no default)*
-$$encoder$$:: $$the encoder to use when sending messages$$ *($$Encoding$$, default: `CRLF`, possible values: `CRLF,LF,NULL,STXETX,RAW,L1,L2,L4`)*
-$$environment$$:: $$additional process environment variables as comma delimited name-value pairs$$ *($$String$$, no default)*
-$$redirectErrorStream$$:: $$redirects stderr to stdout$$ *($$boolean$$, default: `false`)*
-$$workingDir$$:: $$the process working directory$$ *($$String$$, no default)*
-//$sink.shell
-
-[[mongo]]
-=== Mongo
-The Mongo sink writes into a Mongo collection. Here is a simple example
-
-  xd:>stream create --name attendees --definition "http | mongodb --databaseName=test --collectionName=names" --deploy
-
-Then,
-
-  xd:>http post --data {"firstName":"mark"}
-
-In the mongo console you will see the document stored
-
-  > use test
-  switched to db test
-  > show collections
-  names
-  system.indexes
-  > db.names.find()
-  { "_id" : ObjectId("53c93bc324ac76925a77b9df"), "firstName" : "mark" }
-
-//^sink.mongodb
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.mongodb' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$mongodb$$** $$sink$$ has the following options:
-
-$$authenticationDatabaseName$$:: $$the MongoDB authentication database used for connecting$$ *($$String$$, default: ``)*
-$$collectionName$$:: $$the MongoDB collection to store$$ *($$String$$, default: `<stream name>`)*
-$$databaseName$$:: $$the MongoDB database name$$ *($$String$$, default: `xd`)*
-$$host$$:: $$the MongoDB host to connect to$$ *($$String$$, default: `localhost`)*
-$$password$$:: $$the MongoDB password used for connecting$$ *($$String$$, default: ``)*
-$$port$$:: $$the MongoDB port to connect to$$ *($$int$$, default: `27017`)*
-$$username$$:: $$the MongoDB username used for connecting$$ *($$String$$, default: ``)*
-$$writeConcern$$:: $$the default MongoDB write concern to use$$ *($$WriteConcern$$, default: `SAFE`, possible values: `NONE,NORMAL,SAFE,FSYNC_SAFE,REPLICAS_SAFE,JOURNAL_SAFE,MAJORITY`)*
-//$sink.mongodb
-
-
-[[mail]]
-=== Mail
-
-The "mail" sink allows sending of messages as emails, leveraging Spring Integration mail-sending channel adapter. Please refer to Spring Integration documentation for the details, but in a nutshell, the sink is able to handle String, byte[] and MimeMessage messages out of the box.
-
-Here is a simple example of how the mail module is used:
-
-  xd:> stream create mystream --definition "http | mail --to='\"your.email@gmail.com\"' --host=your.imap.server --subject=payload+' world'" --deploy
-
-Then,
-
-  xd:> http post --data Hello 
-
-You would then receive an email whose body contains "Hello" and whose subject is "Hellow world". Of special attention here is the way you need to escape strings for most of the parameters, because they're actually SpEL expressions (so here for example, we used a String literal for the `to` parameter).
-
-//^sink.mail
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.mail' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$mail$$** $$sink$$ has the following options:
-
-$$bcc$$:: $$the recipient(s) that should receive a blind carbon copy (SpEL)$$ *($$String$$, default: `null`)*
-$$cc$$:: $$the recipient(s) that should receive a carbon copy (SpEL)$$ *($$String$$, default: `null`)*
-$$contentType$$:: $$the content type to use when sending the email (SpEL)$$ *($$String$$, default: `null`)*
-$$from$$:: $$the primary recipient(s) of the email (SpEL)$$ *($$String$$, default: `null`)*
-$$host$$:: $$the hostname of the mail server$$ *($$String$$, default: `localhost`)*
-$$password$$:: $$the password to use to connect to the mail server $$ *($$String$$, no default)*
-$$port$$:: $$the port of the mail server$$ *($$int$$, default: `25`)*
-$$replyTo$$:: $$the address that will become the recipient if the original recipient decides to "reply to" the email (SpEL)$$ *($$String$$, default: `null`)*
-$$subject$$:: $$the email subject (SpEL)$$ *($$String$$, default: `null`)*
-$$to$$:: $$the primary recipient(s) of the email (SpEL)$$ *($$String$$, default: `null`)*
-$$username$$:: $$the username to use to connect to the mail server$$ *($$String$$, no default)*
-//$sink.mail
-
-[[rabbitmq]]
-=== RabbitMQ
-
-The "rabbit" sink enables outbound messaging over RabbitMQ.
-
-The following example shows the default settings.
-
-Configure a stream:
-
-     xd:> stream create --name rabbittest --definition "time --interval=3 | rabbit" --deploy
-
-This sends the time, every 3 seconds to the default (no-name) Exchange for a RabbitMQ broker running on localhost, port 5672.
-
-The routing key will be the name of the stream by default; in this case: "rabbittest". Since the default Exchange is a direct-exchange to which all Queues are bound with the Queue name as the binding key, all messages sent via this sink will be passed to a Queue named "rabbittest", if one exists. We do not create that Queue automatically. However, you can easily create a Queue using the RabbitMQ web UI. Then, using that same UI, you can navigate to the "rabbittest" Queue and click the "Get Message(s)" button to pop messages off of that Queue (you can choose whether to requeue those messages).
-
-To destroy the stream, enter the following at the shell prompt:
-
-    xd:> stream destroy --name rabbittest
-
-==== RabbitMQ with Options
-
-//^sink.rabbit
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.rabbit' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$rabbit$$** $$sink$$ has the following options:
-
-$$addresses$$:: $$a comma separated list of 'host[:port]' addresses$$ *($$String$$, default: `${spring.rabbitmq.addresses}`)*
-$$converterClass$$:: $$the class name of the message converter$$ *($$String$$, default: `org.springframework.amqp.support.converter.SimpleMessageConverter`)*
-$$deliveryMode$$:: $$the delivery mode (PERSISTENT, NON_PERSISTENT)$$ *($$String$$, default: `PERSISTENT`)*
-$$exchange$$:: $$the Exchange on the RabbitMQ broker to which messages should be sent$$ *($$String$$, default: ``)*
-$$mappedRequestHeaders$$:: $$request message header names to be propagated to/from the adpater/gateway$$ *($$String$$, default: `STANDARD_REQUEST_HEADERS`)*
-$$password$$:: $$the password to use to connect to the broker$$ *($$String$$, default: `${spring.rabbitmq.password}`)*
-$$routingKey$$:: $$the routing key to be passed with the message, as a SpEL expression$$ *($$String$$, default: `'<stream name>'`)*
-$$sslPropertiesLocation$$:: $$resource containing SSL properties$$ *($$String$$, default: `${spring.rabbitmq.sslProperties}`)*
-$$useSSL$$:: $$true if SSL should be used for the connection$$ *($$String$$, default: `${spring.rabbitmq.useSSL}`)*
-$$username$$:: $$the username to use to connect to the broker$$ *($$String$$, default: `${spring.rabbitmq.username}`)*
-$$vhost$$:: $$the RabbitMQ virtual host to use$$ *($$String$$, default: `${spring.rabbitmq.virtual_host}`)*
-//$sink.rabbit
-
-[NOTE]
-====
-Please be aware that the `routingKey` option is actually a SpEL expression. Hence if a simple, constant, string literal is to be used, make sure to use something like this:
-
-   xd:> stream create rabbitSinkStream --definition "http | rabbit --routingKey='\"myqueue\"'" --deploy
-====
-
-See the xref:MessageBus#rabbitssl[RabbitMQ MessageBus Documentation] for more information about SSL configuration.
-
-[[gemfire-server]]
-=== GemFire Server
-
-Currently XD supports GemFire's client-server topology. A sink that writes data to a GemFire cache requires at least one  cache server to be running in a separate process and may also be configured to use a Locator. While Gemfire configuration is outside of the scope of this document, details are covered in the http://docs.gopivotal.com/gemfire/index.html[GemFire Product documentation]. The XD distribution includes a standalone GemFire server executable suitable for development and test purposes and bootstrapped using a Spring configuration file provided as a command line argument. The GemFire jar is distributed freely under GemFire's development license and is subject to the license's terms and conditions. Sink modules provided with the XD distrubution that write data to GemFire create a client cache and client region. No data is cached on the client.
-
-==== Launching the XD GemFire Server
-
-To start the GemFire cache server GemFire Server included in the Spring XD distribution, go to the XD install directory:
-
-   $cd gemfire/bin
-   $./gemfire-server ../config/cq-demo.xml
-
-The command line argument is the path of a Spring Data Gemfire configuration file with including a configured cache server and one or more regions. A sample cache configuration is provided https://github.com/SpringSource/spring-xd/blob/master/spring-xd-gemfire-server/config/cq-demo.xml[cq-demo.xml] located in the `config` directory. Note that Spring interprets the path as a relative path unless it is explicitly preceded by `file:`. The sample configuration starts a server on port 40404 and creates a region named _Stocks_. 
-
-==== Gemfire sinks
-
-There are 2 implementations of the gemfire sink: _gemfire-server_ and _gemfire-json-server_. They are identical except the latter converts JSON string payloads to a JSON document format proprietary to GemFire and provides JSON field access and query capabilities. If you are not using JSON, the gemfire-server module will write the payload using java serialization to the configured region. Both modules accept the same options.
-
-//^sink.gemfire-server
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.gemfire-server' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$gemfire-server$$** $$sink$$ has the following options:
-
-$$host$$:: $$host name of the cache server or locator (if useLocator=true). May be a comma delimited list$$ *($$String$$, no default)*
-$$keyExpression$$:: $$a SpEL expression which is evaluated to create a cache key$$ *($$String$$, default: `'<stream name>'`)*
-$$port$$:: $$port of the cache server or locator (if useLocator=true). May be a comma delimited list$$ *($$String$$, no default)*
-$$regionName$$:: $$name of the region to use when storing data$$ *($$String$$, default: `<stream name>`)*
-$$useLocator$$:: $$indicates whether a locator is used to access the cache server$$ *($$boolean$$, default: `false`)*
-//$sink.gemfire-server
-
-TIP: The `keyExpression`, as its name suggests, is a SpEL. Typically, the key value is derived from the payload. The default of `'<streamname>'` (mind the quotes), will overwrite the same entry for every message received on the stream.
-
-NOTE: The `useLocator` option is intended for integration with an existing GemFire installation in which the cache servers are configured to use locators in accordance with best practice. GemFire supports configuration of multiple locators (or direct server connections) and this is specified by supplying comma-delimited values for the `host` and `port` options. You may specify a single value for either of these options otherwise each value must contain the same size list. The following are examples are valid for multiple connection addresses:
-
-    gemfire-server --host=myhost --port=10334,10335
-    gemfire server --host=myhost1,myhost2 --port=10334
-    gemfire server --host=myhost1,myhost2,myhost3 --port=10334,10335,10336
-
-The last example creates connections to myhost1:10334, myhost2:10335, myhost3:10336
-
-NOTE: You may also configure default Gemfire connection settings for all gemfire modules in `config\modules.yml`:
-
-    gemfire:
-       useLocator: true
-       host: myhost1,myhost2
-       port: 10334
-
-==== Example
-Suppose we have a JSON document containing a stock price:
-
-      {"symbol":"FAKE", "price":73} 
-
-We want this to be cached using the stock symbol as the key. The stream definition is:
-
-     http | gemfire-json-server --regionName=Stocks --keyExpression=payload.getField('symbol')
-
-The keyExpression is a SpEL expression that depends on the payload type. In this case, _com.gemstone.org.json.JSONObject. JSONObject_ which  provides the _getField_ method. To run this example:
-
-    xd:> stream create --name stocks --definition "http --port=9090 | gemfire-json-server --regionName=Stocks --keyExpression=payload.getField('symbol')" --deploy
-    
-    xd:> http post --target http://localhost:9090 --data {"symbol":"FAKE","price":73}
-
-This will write an entry to the GemFire _Stocks_ region with the key _FAKE_.  Please do not put spaces when separating the JSON key-value pairs, only a comma. 
-
-You should see a message on STDOUT for the process running the GemFire server like:
-
-    INFO [LoggingCacheListener] - updated entry FAKE
-
-TIP: If you are deploying on Java 7 or earlier and need to deploy more than 4 Gemfire modules, be sure to increase the permsize of the singlenode or container. i.e. JAVA_OPTS="-XX:PermSize=256m".  
-
-[[splunk-server]]
-=== Splunk Server
-A http://www.splunk.com/[Splunk] sink that writes data to a TCP Data Input type for Splunk. 
-
-==== Splunk sinks
-The Splunk sink converts an object payload to a string using the object’s toString method and then converts this to a SplunkEvent that is sent via TCP to Splunk.
-
-//^sink.splunk
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.splunk' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$splunk$$** $$sink$$ has the following options:
-
-$$host$$:: $$the host name or IP address of the Splunk server$$ *($$String$$, default: `localhost`)*
-$$owner$$:: $$the owner of the tcpPort$$ *($$String$$, default: `admin`)*
-$$password$$:: $$the password associated with the username$$ *($$String$$, default: `password`)*
-$$port$$:: $$the TCP port number of the Splunk server$$ *($$int$$, default: `8089`)*
-$$tcpPort$$:: $$the TCP port number to where XD will send the data$$ *($$int$$, default: `9500`)*
-$$username$$:: $$the login name that has rights to send data to the tcpPort$$ *($$String$$, default: `admin`)*
-//$sink.splunk
-
-==== How To Setup Splunk for TCP Input
-. From the Manager page select `Manage Inputs` link
-. Click the `Add data` Button
-. Click the `From a TCP port` link
-. `TCP Port` enter the port you want Splunk to monitor
-. `Set Source Type` select `Manual`
-. `Source Type` enter `tcp-raw`
-. Click `Save`
-
-==== Example
-An example stream would be to take data from a twitter search and push it through to a splunk instance.
-
-    xd:> stream create --name springone2gx --definition "twittersearch --consumerKey= --consumerSecret= --query='#LOTR' | splunk" --deploy
-
-[[mqtt-sink]]
-=== MQTT Sink
-The mqtt sink connects to an mqtt server and publishes telemetry messages.
-
-==== Options
-//^sink.mqtt
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.mqtt' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$mqtt$$** $$sink$$ has the following options:
-
-$$async$$:: $$whether or not to use async sends$$ *($$boolean$$, default: `false`)*
-$$charset$$:: $$the charset used to convert a String payload to byte[]$$ *($$String$$, default: `UTF-8`)*
-$$cleanSession$$:: $$whether the client and server should remember state across restarts and reconnects$$ *($$boolean$$, default: `true`)*
-$$clientId$$:: $$identifies the client$$ *($$String$$, default: `xd.mqtt.client.id.snk`)*
-$$connectionTimeout$$:: $$the connection timeout in seconds$$ *($$int$$, default: `30`)*
-$$keepAliveInterval$$:: $$the ping interval in seconds$$ *($$int$$, default: `60`)*
-$$password$$:: $$the password to use when connecting to the broker$$ *($$String$$, default: `guest`)*
-$$persistence$$:: $$'memory' or 'file'$$ *($$String$$, default: `memory`)*
-$$persistenceDirectory$$:: $$file location when using 'file' persistence$$ *($$String$$, default: `/tmp/paho`)*
-$$qos$$:: $$the quality of service to use$$ *($$int$$, default: `1`)*
-$$retained$$:: $$whether to set the 'retained' flag$$ *($$boolean$$, default: `false`)*
-$$topic$$:: $$the topic to which the sink will publish$$ *($$String$$, default: `xd.mqtt.test`)*
-$$url$$:: $$location of the mqtt broker(s) (comma-delimited list)$$ *($$String$$, default: `tcp://localhost:1883`)*
-$$username$$:: $$the username to use when connecting to the broker$$ *($$String$$, default: `guest`)*
-//$sink.mqtt
-
-NOTE: The defaults are set up to connect to the RabbitMQ MQTT adapter on localhost.
-
-[[dynamic-router]]
-=== Dynamic Router
-
-The Dynamic Router support allows for routing Spring XD messages to *named channels* based on the evaluation of SpEL expressions or Groovy Scripts.
-
-==== SpEL-based Routing
-
-In the following example, 2 streams are created that listen for message on the *foo* and the *bar* channel. Furthermore, we create a stream that receives messages via HTTP and then delegates the received messages to a router:
-
-----
-xd:>stream create f --definition "queue:foo > transform --expression=payload+'-foo' | log" --deploy
-Created new stream 'f'
-
-xd:>stream create b --definition "queue:bar > transform --expression=payload+'-bar' | log" --deploy
-Created new stream 'b'
-
-xd:>stream create r --definition "http | router --expression=payload.contains('a')?'queue:foo':'queue:bar'" --deploy
-Created new stream 'r'
-----
-
-Now we make 2 requests to the HTTP source:
-
-----
-xd:>http post --data "a"
-> POST (text/plain;Charset=UTF-8) http://localhost:9000 a
-> 200 OK
-
-xd:>http post --data "b"
-> POST (text/plain;Charset=UTF-8) http://localhost:9000 b
-> 200 OK
-----
-
-In the server log you should see the following output:
-
-----
-11:54:19,868  WARN ThreadPoolTaskScheduler-1 sink.f:145 - a-foo
-11:54:25,669  WARN ThreadPoolTaskScheduler-1 sink.b:145 - b-bar
-----
-
-For more information, please also consult the Spring Integration Reference manual: http://static.springsource.org/spring-integration/reference/html/messaging-routing-chapter.html#router-namespace particularly the section "Routers and the Spring Expression Language (SpEL)".	
-
-==== Groovy-based Routing
-
-Instead of SpEL expressions, Groovy scripts can also be used. Let's create a Groovy script in the file system at "/my/path/router.groovy"
-
-[source,groovy]
-----
-println("Groovy processing payload '" + payload +"'");
-if (payload.contains('a')) {
-	return ":foo"
-}
-else {
-	return ":bar"
-}
-----
-
-Now we create the following streams:
-
-----
-xd:>stream create f --definition ":foo > transform --expression=payload+'-foo' | log" --deploy
-Created new stream 'f'
-
-xd:>stream create b --definition ":bar > transform --expression=payload+'-bar' | log" --deploy
-Created new stream 'b'
-
-xd:>stream create g --definition "http | router --script='file:/my/path/router.groovy'" --deploy
-----
-
-Now post some data to the HTTP source:
-
-----
-xd:>http post --data "a"
-> POST (text/plain;Charset=UTF-8) http://localhost:9000 a
-> 200 OK
-
-xd:>http post --data "b"
-> POST (text/plain;Charset=UTF-8) http://localhost:9000 b
-> 200 OK
-----
-
-In the server log you should see the following output:
-
-----
-Groovy processing payload 'a'
-11:29:27,274  WARN ThreadPoolTaskScheduler-1 sink.f:145 - a-foo
-Groovy processing payload 'b'
-11:34:09,797  WARN ThreadPoolTaskScheduler-1 sink.b:145 - b-bar
-----
-
-[NOTE]
-===============================
-You can also use Groovy scripts located on your classpath by specifying:
-----
---script='org/my/package/router.groovy'
-----
-===============================
-
-If you want to pass variable values to your script, you can statically bind values using the _variables_ option or optionally pass the path to a properties file containing the bindings using the _propertiesLocation_ option. All properties in the file will be made available to the script as variables. You may specify both _variables_ and _propertiesLocation_, in which case any duplicate values provided as _variables_ override values provided in _propertiesLocation_. Note that _payload_ and _headers_ are implicitly bound to give you access to the data contained in a message. 
-
-For more information, see the Spring Integration Reference manual: "Groovy support"
-http://static.springsource.org/spring-integration/reference/html/messaging-endpoints-chapter.html#groovy
-
-==== Options
-
-//^sink.router
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.router' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$router$$** $$sink$$ has the following options:
-
-$$expression$$:: $$a SpEL expression used to transform messages$$ *($$String$$, default: `payload.toString()`)*
-$$propertiesLocation$$:: $$the path of a properties file containing custom script variable bindings$$ *($$String$$, no default)*
-$$script$$:: $$reference to a script used to process messages$$ *($$String$$, no default)*
-$$variables$$:: $$variable bindings as a comma delimited string of name-value pairs, e.g., 'foo=bar,baz=car'$$ *($$String$$, no default)*
-//$sink.router
-
-TIP: If the `script` option is set, the script is checked for updates every 60 seconds. 
-
-[[null-sink]]
-=== Null Sink
-
-Null sink can be useful when the main stream isn't focused on stream destination but the tap streams are used for analytics etc.,
-It is also useful to iteratively add in steps to a stream without worrying about having to land data anywhere.
-
-For example, 
-
-----
-xd:>stream create nullStream --definition "http | null" --deploy
-Created and deployed new stream 'nullStream'
-xd:>stream create tap1 --definition "tap:stream:nullStream > counter" --deploy
-Created and deployed new stream 'tap1'
-----
-In the above, the null sink can be useful as we can create as many number of tap streams off the main stream while we set the main stream sink as null.
-
-[[redis]]
-=== Redis
-
-Redis sink can be used to ingest data into redis store. You can choose `queue`, `topic` or `key` with selcted collection type to point to a specific data store.
-
-For example,
-----
-xd:>stream create store-into-redis --definition "http | redis --queue=myList" --deploy
-xd:>Created and deployed new stream 'store-into-redis'
-----
-
-==== Options
-
-//^sink.redis
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.redis' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$redis$$** $$sink$$ has the following options:
-
-$$collectionType$$:: $$the collection type to use for the given key$$ *($$CollectionType$$, default: `LIST`, possible values: `LIST,SET,ZSET,MAP,PROPERTIES`)*
-$$database$$:: $$database index used by the connection factory$$ *($$int$$, default: `0`)*
-$$hostname$$:: $$redis host name$$ *($$String$$, default: `localhost`)*
-$$key$$:: $$name for the key$$ *($$String$$, no default)*
-$$keyExpression$$:: $$a SpEL expression to use for keyExpression$$ *($$String$$, no default)*
-$$maxActive$$:: $$max number of connections that can be allocated by the pool at a given time; negative value for no limit$$ *($$int$$, default: `8`)*
-$$maxIdle$$:: $$max number of idle connections in the pool; a negative value indicates an unlimited number of idle connections$$ *($$int$$, default: `8`)*
-$$maxWait$$:: $$max amount of time (in milliseconds) a connection allocation should block before throwing an exception when the pool is exhausted; negative value to block indefinitely$$ *($$int$$, default: `-1`)*
-$$minIdle$$:: $$target for the minimum number of idle connections to maintain in the pool; only has an effect if it is positive$$ *($$int$$, default: `0`)*
-$$password$$:: $$redis password$$ *($$String$$, default: ``)*
-$$port$$:: $$redis port$$ *($$int$$, default: `6379`)*
-$$queue$$:: $$name for the queue$$ *($$String$$, no default)*
-$$queueExpression$$:: $$a SpEL expression to use for queue$$ *($$String$$, no default)*
-$$sentinelMaster$$:: $$name of Redis master server$$ *($$String$$, default: ``)*
-$$sentinelNodes$$:: $$comma-separated list of host:port pairs$$ *($$String$$, default: ``)*
-$$topic$$:: $$name for the topic$$ *($$String$$, no default)*
-$$topicExpression$$:: $$a SpEL expression to use for topic$$ *($$String$$, no default)*
-//$sink.redis
-
-
-[[kafka-sink]]
-=== Kafka Sink
-
-Kafka sink can be used to ingest data into a specific Kafka topic configuration.
-
-For example,
-----
-xd:>stream create push-to-kafka --definition "http | kafka --topic=myTopic" --deploy
-xd:>Created and deployed new stream 'push-to-kafka'
-xd:>http post --data "push-messages"
-> POST (text/plain;Charset=UTF-8) http://localhost:9000 push-messages
-> 200 OK
-----
-Now, the posted messages will be available on kafka topic `myTopic`.
-
-//^sink.kafka
-// DO NOT MODIFY THE LINES BELOW UNTIL THE CLOSING '//$sink.kafka' TAG
-// THIS SNIPPET HAS BEEN GENERATED BY ModuleOptionsReferenceDoc AND MANUAL EDITS WILL BE LOST
-The **$$kafka$$** $$sink$$ has the following options:
-
-$$batchCount$$:: $$the number of messages to send in one batch when using async mode$$ *($$int$$, default: `200`)*
-$$brokerList$$:: $$comma separated broker list$$ *($$String$$, default: `localhost:9092`)*
-$$compressedTopics$$:: $$comma separated list of topics to apply the compression codec$$ *($$String$$, default: ``)*
-$$compressionCodec$$:: $$compression codec to use$$ *($$String$$, default: `none`)*
-$$encoding$$:: $$string encoder to translate bytes into string$$ *($$String$$, default: `UTF8`)*
-$$enqueueTimeout$$:: $$the amount of time to block before dropping messages when running in async mode$$ *($$int$$, default: `-1`)*
-$$maxBufferMsgs$$:: $$the maximum number of unsent messages that can be queued up the async producer$$ *($$int$$, default: `10000`)*
-$$maxBufferTime$$:: $$maximum time in milliseconds to buffer data when using async mode$$ *($$int$$, default: `5000`)*
-$$maxSendRetries$$:: $$number of attempts to automatically retry a failed send request$$ *($$int$$, default: `3`)*
-$$producerType$$:: $$producer type$$ *($$String$$, default: `sync`)*
-$$requestRequiredAck$$:: $$producer request acknowledgement mode$$ *($$int$$, default: `0`)*
-$$requestTimeout$$:: $$timeout in milliseconds after waiting for request required ack$$ *($$int$$, default: `10000`)*
-$$retryBackoff$$:: $$amount of time the producer waits before refreshing the metadata$$ *($$int$$, default: `100`)*
-$$socketBufferSize$$:: $$socket write buffer size$$ *($$int$$, default: `102400`)*
-$$topic$$:: $$kafka topic name$$ *($$String$$, default: `<stream name>`)*
-$$topicMetadataRefreshInterval$$:: $$topic metadata refresh interval$$ *($$int$$, default: `600000`)*
-//$sink.kafka

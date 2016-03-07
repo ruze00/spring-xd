@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2015 the original author or authors.
+ * Copyright 2002-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import org.springframework.messaging.support.GenericMessage;
 
 /**
  * @author Gary Russell
+ * @author Artem Bilan
  * @since 1.0
  *
  */
@@ -42,15 +43,33 @@ public class MessageConverterTests {
 				.setHeader("foo", "bar")
 				.setHeader("baz", "quxx")
 				.build();
-		Message<byte[]> converted = converter.embedHeaders(message, "foo", "baz");
-		assertEquals(0xff, converted.getPayload()[0] & 0xff);
+		byte[] embedded = converter.embedHeaders(new MessageValues(message), "foo", "baz");
+		assertEquals(0xff, embedded[0] & 0xff);
 		assertEquals("\u0002\u0003foo\u0000\u0000\u0000\u0005\"bar\"\u0003baz\u0000\u0000\u0000\u0006\"quxx\"Hello",
-				new String(converted.getPayload()).substring(1));
+				new String(embedded).substring(1));
 
-		converted = converter.extractHeaders(converted);
-		assertEquals("Hello", new String(converted.getPayload()));
-		assertEquals("bar", converted.getHeaders().get("foo"));
-		assertEquals("quxx", converted.getHeaders().get("baz"));
+		MessageValues extracted = converter.extractHeaders(MessageBuilder.withPayload(embedded).build(), false);
+		assertEquals("Hello", new String((byte[])extracted.getPayload()));
+		assertEquals("bar", extracted.get("foo"));
+		assertEquals("quxx", extracted.get("baz"));
+	}
+
+	@Test
+	public void testUnicodeHeader() throws Exception {
+		EmbeddedHeadersMessageConverter converter = new EmbeddedHeadersMessageConverter();
+		Message<byte[]> message = MessageBuilder.withPayload("Hello".getBytes())
+				.setHeader("foo", "bar")
+				.setHeader("baz", "\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8") // ØØØØØØØØ
+				.build();
+		byte[] embedded = converter.embedHeaders(new MessageValues(message), "foo", "baz");
+		assertEquals(0xff, embedded[0] & 0xff);
+		assertEquals("\u0002\u0003foo\u0000\u0000\u0000\u0005\"bar\"\u0003baz\u0000\u0000\u0000\u0012\"\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8\"Hello",
+				new String(embedded, "UTF-8").substring(1));
+
+		MessageValues extracted = converter.extractHeaders(MessageBuilder.withPayload(embedded).build(), false);
+		assertEquals("Hello", new String((byte[])extracted.getPayload()));
+		assertEquals("bar", extracted.get("foo"));
+		assertEquals("\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8\u00d8", extracted.get("baz"));
 	}
 
 	@Test
@@ -59,10 +78,10 @@ public class MessageConverterTests {
 		Message<byte[]> message = MessageBuilder.withPayload("Hello".getBytes())
 				.setHeader("foo", "bar")
 				.build();
-		Message<byte[]> converted = converter.embedHeaders(message, "foo", "baz");
-		assertEquals(0xff, converted.getPayload()[0] & 0xff);
+		byte[] embedded = converter.embedHeaders(new MessageValues(message), "foo", "baz");
+		assertEquals(0xff, embedded[0] & 0xff);
 		assertEquals("\u0001\u0003foo\u0000\u0000\u0000\u0005\"bar\"Hello",
-				new String(converted.getPayload()).substring(1));
+				new String(embedded).substring(1));
 	}
 
 	@Test
@@ -70,10 +89,10 @@ public class MessageConverterTests {
 		EmbeddedHeadersMessageConverter converter = new EmbeddedHeadersMessageConverter();
 		byte[] bytes = "\u0002\u0003foo\u0003bar\u0003baz\u0004quxxHello".getBytes("UTF-8");
 		Message<byte[]> message = new GenericMessage<byte[]>(bytes);
-		Message<byte[]> converted = converter.extractHeaders(message);
-		assertEquals("Hello", new String(converted.getPayload()));
-		assertEquals("bar", converted.getHeaders().get("foo"));
-		assertEquals("quxx", converted.getHeaders().get("baz"));
+		MessageValues extracted = converter.extractHeaders(message,false);
+		assertEquals("Hello", new String((byte[])extracted.getPayload()));
+		assertEquals("bar", extracted.get("foo"));
+		assertEquals("quxx", extracted.get("baz"));
 	}
 
 	@Test
@@ -82,7 +101,7 @@ public class MessageConverterTests {
 		byte[] bytes = "\u0002\u0003foo\u0020bar\u0003baz\u0004quxxHello".getBytes("UTF-8");
 		Message<byte[]> message = new GenericMessage<byte[]>(bytes);
 		try {
-			converter.extractHeaders(message);
+			converter.extractHeaders(message,false);
 			Assert.fail("Exception expected");
 		}
 		catch (Exception e) {

@@ -22,7 +22,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.integration.channel.DirectChannel;
+import org.springframework.integration.channel.interceptor.WireTap;
 import org.springframework.messaging.Message;
+import org.springframework.messaging.support.ChannelInterceptor;
+import org.springframework.util.Assert;
 import org.springframework.util.MimeType;
 import org.springframework.xd.dirt.integration.bus.MessageBus;
 import org.springframework.xd.spark.streaming.SparkMessageSender;
@@ -32,6 +36,7 @@ import org.springframework.xd.spark.streaming.SparkMessageSender;
  *
  * @author Ilayaperumal Gopinathan
  * @author Mark Fisher
+ * @author Gary Russell
  * @since 1.1
  */
 @SuppressWarnings("serial")
@@ -50,6 +55,8 @@ class MessageBusSender extends SparkMessageSender {
 
 	private final Properties moduleProducerProperties;
 
+	private final Properties moduleProperties;
+
 	private MessageBus messageBus;
 
 	private ConfigurableApplicationContext applicationContext;
@@ -62,17 +69,25 @@ class MessageBusSender extends SparkMessageSender {
 
 	private final SparkStreamingChannel outputChannel;
 
-	public MessageBusSender(String outputChannelName, Properties messageBusProperties,
-			Properties moduleProducerProperties, MimeType contentType) {
-		this(null, outputChannelName, messageBusProperties, moduleProducerProperties, contentType);
+	private final String tapChannelName;
+
+	private static final String ENABLE_TAP_PROP = "enableTap";
+
+	public MessageBusSender(String outputChannelName, String tapChannelName, Properties messageBusProperties,
+			Properties moduleProducerProperties, MimeType contentType, Properties moduleProperties) {
+		this(null, outputChannelName, tapChannelName, messageBusProperties, moduleProducerProperties, contentType,
+				moduleProperties);
 	}
 
 	public MessageBusSender(LocalMessageBusHolder messageBusHolder, String outputChannelName,
-			Properties messageBusProperties, Properties moduleProducerProperties, MimeType contentType) {
+			String tapChannelName, Properties messageBusProperties, Properties moduleProducerProperties,
+			MimeType contentType, Properties moduleProperties) {
 		this.messageBusHolder = messageBusHolder;
 		this.outputChannelName = outputChannelName;
+		this.tapChannelName = tapChannelName;
 		this.messageBusProperties = messageBusProperties;
 		this.moduleProducerProperties = moduleProducerProperties;
+		this.moduleProperties = moduleProperties;
 		this.contentType = contentType;
 		this.outputChannel = new SparkStreamingChannel();
 	}
@@ -94,9 +109,40 @@ class MessageBusSender extends SparkMessageSender {
 					outputChannel.configureMessageConverter(contentType);
 				}
 				messageBus.bindProducer(outputChannelName, outputChannel, moduleProducerProperties);
+				if (isTapEnabled()) {
+					addTapChannel();
+				}
 			}
 			this.running = true;
 		}
+	}
+
+	/**
+	 * Check if the tap is enabled for this module's output.
+	 *
+	 * @return boolean
+	 */
+	private boolean isTapEnabled() {
+		boolean tapEnabled = false;
+		String enableTap = this.moduleProperties.getProperty(ENABLE_TAP_PROP);
+		if (enableTap != null) {
+			tapEnabled = enableTap.equalsIgnoreCase(Boolean.TRUE.toString());
+		}
+		return tapEnabled;
+	}
+
+	/**
+	 * Add tap channel to the module's output channel.
+	 * Also, bind the tap channel to the message bus.
+	 */
+	private void addTapChannel() {
+		Assert.notNull(outputChannel, "Output channel can not be null.");
+		Assert.notNull(messageBus, "MessageBus can not be null.");
+		logger.info("creating and binding tap channel for {}", tapChannelName);
+		DirectChannel tapChannel = new DirectChannel();
+		tapChannel.setBeanName(tapChannelName + ".tap.bridge");
+		messageBus.bindPubSubProducer(tapChannelName, tapChannel, null);
+		outputChannel.addInterceptor(new WireTap(tapChannel));
 	}
 
 	@Override
@@ -110,6 +156,14 @@ class MessageBusSender extends SparkMessageSender {
 		if (this.isRunning() && messageBus != null) {
 			logger.info("stopping MessageBusSender");
 			messageBus.unbindProducer(outputChannelName, outputChannel);
+			for (ChannelInterceptor interceptor : outputChannel.getChannelInterceptors()) {
+				if (interceptor instanceof WireTap) {
+					((WireTap) interceptor).stop();
+				}
+			}
+			if (isTapEnabled()) {
+				messageBus.unbindProducers(tapChannelName);
+			}
 			messageBus = null;
 		}
 		if (applicationContext != null) {
